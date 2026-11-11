@@ -1,0 +1,13 @@
+{
+  "name": "orderblock-terminal",
+  "version": "1.0.0",
+  "description": "Smart Money Concepts & Order Block Trading Platform (MERN)",
+  "scripts": {
+    "dev": "(cd backend && npm start) & (cd web && npm run dev) & (cd admin && npm run dev)",
+    "start": "(cd backend && npm start) & (cd web && npm run dev) & (cd admin && npm run dev)",
+    "backend": "cd backend && npm start",
+    "web": "cd web && npm run dev",
+    "admin": "cd admin && npm run dev",
+    "build": "cd web && npm run build && cd ../admin && npm run build"
+  }
+}

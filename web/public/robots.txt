@@ -1,0 +1,34 @@
+# OrderBlock X — https://violet-lark-104376.hostingersite.com
+User-agent: *
+Allow: /
+Allow: /news
+Allow: /blog
+Allow: /pricing
+Allow: /about
+Allow: /about-us
+Allow: /contact
+Allow: /privacy-policy
+Allow: /privacy
+Allow: /terms
+Allow: /terms-and-conditions
+Allow: /faq
+
+# Auth & private trader tools — do not index
+Disallow: /login
+Disallow: /register
+Disallow: /dashboard
+Disallow: /trade-log
+Disallow: /journal
+Disallow: /terminal
+Disallow: /momentum
+Disallow: /opening-momentum
+Disallow: /xray
+Disallow: /market-xray
+Disallow: /chart/
+
+# Admin / API / internals
+Disallow: /admin
+Disallow: /api/
+Disallow: /socket.io/
+
+Sitemap: https://violet-lark-104376.hostingersite.com/sitemap.xml
