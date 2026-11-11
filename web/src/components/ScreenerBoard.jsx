@@ -2,12 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   TrendingUp,
   TrendingDown,
-  Flame,
-  Filter,
   Search,
-  ExternalLink,
-  Target,
-  Clock,
   Sparkles,
   Maximize2,
   Lock
@@ -68,105 +63,114 @@ export default function ScreenerBoard({
 
   const sectors = ['ALL', 'Banking', 'IT', 'Auto', 'Energy', 'Metals', 'Pharma', 'Financials'];
 
+  const resultCount = filteredBullish.length + filteredBearish.length;
+
   return (
-    <div className="space-y-5">
-      {/* Search & Filter Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3.5 backdrop-blur-md">
-        {/* Search Input */}
-        <div className="relative min-w-[240px] flex-1">
-          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="space-y-2.5 rounded-xl border border-slate-800/70 bg-slate-900/40 p-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
           <input
             type="text"
-            placeholder="Search F&O stocks (e.g. RELIANCE, HDFCBANK)..."
+            placeholder="Search symbol or name…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full rounded-xl bg-slate-950/80 py-2 pl-10 pr-4 text-xs font-medium text-slate-100 placeholder-slate-500 border border-slate-800 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full rounded-lg bg-slate-950/80 py-2 pl-9 pr-3 text-[12px] font-medium text-slate-100 placeholder-slate-500 border border-slate-800 focus:border-cyan-500/60 focus:outline-none"
           />
         </div>
 
-        {/* Sector Pills */}
-        <div className="flex items-center space-x-1 overflow-x-auto scrollbar-none py-1">
+        <div className="flex flex-wrap items-center gap-1.5">
           {sectors.map((sec) => (
             <button
               key={sec}
+              type="button"
               onClick={() => setSelectedSector(sec)}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${selectedSector === sec
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors shrink-0 ${
+                selectedSector === sec
+                  ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/35'
+                  : 'text-slate-400 border border-transparent hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
             >
               {sec}
             </button>
           ))}
         </div>
 
-        {/* Timeframe & Score Filter */}
-        <div className="flex items-center space-x-3 text-xs">
-          <div className="flex items-center space-x-1 rounded-lg bg-slate-950 p-1 border border-slate-800">
-            {['1m', '5m', '15m'].map((tf) => {
-              const allowed = membership.canUseTimeframe(tf);
-              return (
-                <button
-                  key={tf}
-                  type="button"
-                  disabled={!allowed}
-                  title={allowed ? tf : `Upgrade plan to unlock ${tf}`}
-                  onClick={() => {
-                    if (!allowed) {
-                      onOpenPricing?.();
-                      return;
-                    }
-                    setTimeframe(tf);
-                  }}
-                  className={`rounded px-2 py-0.5 font-mono text-[11px] inline-flex items-center gap-1 ${timeframe === tf
-                      ? 'bg-cyan-500 text-black font-bold'
-                      : allowed
-                        ? 'text-slate-400 hover:text-slate-200'
-                        : 'text-slate-600 cursor-not-allowed opacity-70'
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-medium text-slate-500">TF</span>
+            <div className="inline-flex rounded-lg border border-slate-800 bg-slate-950 p-0.5">
+              {['1m', '5m', '15m'].map((tf) => {
+                const allowed = membership.canUseTimeframe(tf);
+                return (
+                  <button
+                    key={tf}
+                    type="button"
+                    disabled={!allowed}
+                    title={allowed ? tf : `Upgrade to unlock ${tf}`}
+                    onClick={() => {
+                      if (!allowed) {
+                        onOpenPricing?.();
+                        return;
+                      }
+                      setTimeframe(tf);
+                    }}
+                    className={`min-w-[2.25rem] rounded-md px-2 py-1 text-[11px] font-semibold inline-flex items-center justify-center gap-1 ${
+                      timeframe === tf
+                        ? 'bg-cyan-500 text-black'
+                        : allowed
+                          ? 'text-slate-400 hover:text-white'
+                          : 'text-slate-600 cursor-not-allowed'
                     }`}
-                >
-                  {!allowed && <Lock className="h-2.5 w-2.5" />}
-                  {tf}
-                </button>
-              );
-            })}
+                  >
+                    {!allowed && <Lock className="h-2.5 w-2.5" />}
+                    {tf}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="flex items-center space-x-1.5 text-slate-400">
-            <span className="text-[11px]">Min Score:</span>
-            <select
-              value={minScore}
-              onChange={(e) => setMinScore(Number(e.target.value))}
-              className="rounded-lg bg-slate-950 px-2 py-1 text-[11px] font-mono text-cyan-400 border border-slate-800 focus:outline-none"
-            >
-              <option value={60}>60+</option>
-              <option value={75}>75+ (High Quality)</option>
-              <option value={85}>85+ (Institutional Prime)</option>
-            </select>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[10px] text-slate-500">
+              Min score
+              <select
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="rounded-md bg-slate-950 px-2 py-1 text-[11px] font-medium text-slate-200 border border-slate-800 focus:outline-none"
+              >
+                <option value={60}>60+</option>
+                <option value={75}>75+</option>
+                <option value={85}>85+</option>
+              </select>
+            </label>
+            <span className="text-[10px] text-slate-500">
+              {resultCount} result{resultCount === 1 ? '' : 's'}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Main Dual Boards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ================= BULLISH BOARD ================= */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between border-b border-emerald-900/40 pb-2.5">
-            <div className="flex items-center space-x-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
-                <TrendingUp className="h-4 w-4" />
+      {/* Boards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-0.5">
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-400">
+                <TrendingUp className="h-3.5 w-3.5" />
               </div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-emerald-400">
-                Bullish Order Blocks ({filteredBullish.length})
+              <h2 className="text-[12px] font-semibold text-emerald-400">
+                Bullish · {filteredBullish.length}
               </h2>
             </div>
-            <span className="text-[11px] font-mono text-slate-400">Institutional Demand Zones</span>
+            <span className="text-[10px] text-slate-500">Demand zones</span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filteredBullish.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-500">
-                No bullish setups matching the current filters.
+              <div className="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-[11px] text-slate-500">
+                No bullish matches for these filters.
               </div>
             ) : (
               displayBullish.map((setup) => {
@@ -175,88 +179,77 @@ export default function ScreenerBoard({
                   <div
                     key={setup.symbol}
                     onClick={() => onSelectStock(setup.symbol)}
-                    className={`group relative cursor-pointer rounded-2xl border p-4 transition-all duration-300 hover:scale-[1.01] hover:shadow-xl ${isTick
-                        ? 'border-emerald-500/80 bg-emerald-950/20 shadow-lg shadow-emerald-500/10'
+                    className={`group relative cursor-pointer rounded-xl border px-3 py-2.5 transition-all duration-200 hover:shadow-md ${isTick
+                        ? 'border-emerald-500/80 bg-emerald-950/20 shadow-md shadow-emerald-500/10'
                         : 'border-slate-800/80 bg-slate-900/70 hover:border-emerald-500/40'
                       }`}
                   >
-                    {/* Top Row: Symbol, Price, Score */}
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-2.5">
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-base font-extrabold text-white group-hover:text-emerald-400 transition-colors">
-                              {setup.symbol}
-                            </span>
-                            <span className="rounded bg-slate-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-300 border border-slate-700/50">
-                              {setup.sector}
-                            </span>
-                          </div>
-                          <span className="text-[11px] text-slate-400">{setup.name}</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors">
+                            {setup.symbol}
+                          </span>
+                          <span className="rounded-md bg-slate-800/70 px-1.5 py-0.5 text-[9px] font-medium text-slate-400">
+                            {setup.sector}
+                          </span>
                         </div>
+                        <span className="block truncate text-[10px] text-slate-500">{setup.name}</span>
                       </div>
 
-                      {/* Quality Score & Price */}
-                      <div className="text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <span className="font-mono text-sm font-bold text-white">
+                      <div className="text-right shrink-0">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span className="font-mono text-xs font-semibold text-white">
                             ₹{setup.currentPrice.toLocaleString('en-IN')}
                           </span>
                           <span
-                            className={`font-mono text-xs font-semibold ${setup.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                              }`}
+                            className={`font-mono text-[10px] font-semibold ${
+                              setup.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
                           >
                             {setup.change >= 0 ? `+${setup.change}%` : `${setup.change}%`}
                           </span>
                         </div>
-                        {/* Score Pill */}
-                        <div className="mt-1 flex items-center justify-end space-x-1">
-                          <span className="rounded-md bg-emerald-950/80 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-400 border border-emerald-800/50 shadow-sm">
-                            ★ {setup.score}/100 Quality
+                        <div className="mt-0.5 flex items-center justify-end">
+                          <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-mono font-semibold text-emerald-400">
+                            {setup.score}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Middle Row: Zone Box Metrics */}
-                    <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-xl bg-slate-950/70 p-2.5 border border-slate-800/60 text-xs">
+                    <div className="mt-2 grid grid-cols-3 gap-2 rounded-lg bg-slate-950/50 px-2.5 py-2 border border-slate-800/50">
                       <div>
-                        <div className="text-[10px] text-slate-400">Order Block Zone</div>
-                        <div className="font-mono font-semibold text-emerald-300">
-                          ₹{setup.zoneBottom} - ₹{setup.zoneTop}
+                        <div className="text-[10px] text-slate-500">Zone</div>
+                        <div className="mt-0.5 font-mono text-[11px] font-semibold text-emerald-300 truncate">
+                          ₹{setup.zoneBottom}–{setup.zoneTop}
                         </div>
                       </div>
-
                       <div>
-                        <div className="text-[10px] text-slate-400">Distance to Zone</div>
-                        <div className="font-mono font-semibold text-slate-200">
+                        <div className="text-[10px] text-slate-500">Distance</div>
+                        <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-200">
                           {setup.distancePercent}%
                         </div>
                       </div>
-
                       <div>
-                        <div className="text-[10px] text-slate-400">Liquidity Target</div>
-                        <div className="font-mono font-semibold text-cyan-400">
+                        <div className="text-[10px] text-slate-500">Target</div>
+                        <div className="mt-0.5 font-mono text-[11px] font-semibold text-cyan-400 truncate">
                           ₹{setup.liquidityTarget}
                         </div>
                       </div>
                     </div>
 
-                    {/* Footer Row: Structure status & View Chart */}
-                    <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
-                      <div className="flex items-center space-x-2">
-                        <span className="flex items-center text-emerald-400 font-medium">
-                          <Sparkles className="mr-1 h-3 w-3" />
-                          {setup.testCount === 0 ? 'Fresh Untouched Zone' : `Tested ${setup.testCount}x`}
+                    <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate text-emerald-400/90">
+                          {setup.testCount === 0 ? 'Fresh' : `Tested ${setup.testCount}×`}
                         </span>
-                        <span>•</span>
-                        <span className="font-mono">{setup.volumeRatio}x Vol Surge</span>
+                        <span className="text-slate-600">·</span>
+                        <span className="font-mono shrink-0">{setup.volumeRatio}× vol</span>
                       </div>
-
-                      <button className="flex items-center space-x-1 text-slate-400 group-hover:text-emerald-400 transition-colors font-medium">
-                        <span>View Chart</span>
-                        <Maximize2 className="h-3 w-3" />
-                      </button>
+                      <span className="inline-flex items-center gap-1 text-slate-500 group-hover:text-emerald-400 transition-colors shrink-0">
+                        Chart <Maximize2 className="h-2.5 w-2.5" />
+                      </span>
                     </div>
                   </div>
                 );
@@ -265,24 +258,23 @@ export default function ScreenerBoard({
           </div>
         </div>
 
-        {/* ================= BEARISH BOARD ================= */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between border-b border-rose-900/40 pb-2.5">
-            <div className="flex items-center space-x-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-950/80 text-rose-400 border border-rose-800/50">
-                <TrendingDown className="h-4 w-4" />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-0.5">
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-rose-500/10 text-rose-400">
+                <TrendingDown className="h-3.5 w-3.5" />
               </div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-rose-400">
-                Bearish Order Blocks ({filteredBearish.length})
+              <h2 className="text-[12px] font-semibold text-rose-400">
+                Bearish · {filteredBearish.length}
               </h2>
             </div>
-            <span className="text-[11px] font-mono text-slate-400">Institutional Supply Zones</span>
+            <span className="text-[10px] text-slate-500">Supply zones</span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filteredBearish.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-500">
-                No bearish setups matching the current filters.
+              <div className="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-[11px] text-slate-500">
+                No bearish matches for these filters.
               </div>
             ) : (
               displayBearish.map((setup) => {
@@ -291,88 +283,77 @@ export default function ScreenerBoard({
                   <div
                     key={setup.symbol}
                     onClick={() => onSelectStock(setup.symbol)}
-                    className={`group relative cursor-pointer rounded-2xl border p-4 transition-all duration-300 hover:scale-[1.01] hover:shadow-xl ${isTick
-                        ? 'border-rose-500/80 bg-rose-950/20 shadow-lg shadow-rose-500/10'
+                    className={`group relative cursor-pointer rounded-xl border px-3 py-2.5 transition-all duration-200 hover:shadow-md ${isTick
+                        ? 'border-rose-500/80 bg-rose-950/20 shadow-md shadow-rose-500/10'
                         : 'border-slate-800/80 bg-slate-900/70 hover:border-rose-500/40'
                       }`}
                   >
-                    {/* Top Row: Symbol, Price, Score */}
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-2.5">
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-base font-extrabold text-white group-hover:text-rose-400 transition-colors">
-                              {setup.symbol}
-                            </span>
-                            <span className="rounded bg-slate-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-300 border border-slate-700/50">
-                              {setup.sector}
-                            </span>
-                          </div>
-                          <span className="text-[11px] text-slate-400">{setup.name}</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-white group-hover:text-rose-400 transition-colors">
+                            {setup.symbol}
+                          </span>
+                          <span className="rounded-md bg-slate-800/70 px-1.5 py-0.5 text-[9px] font-medium text-slate-400">
+                            {setup.sector}
+                          </span>
                         </div>
+                        <span className="block truncate text-[10px] text-slate-500">{setup.name}</span>
                       </div>
 
-                      {/* Quality Score & Price */}
-                      <div className="text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <span className="font-mono text-sm font-bold text-white">
+                      <div className="text-right shrink-0">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span className="font-mono text-xs font-semibold text-white">
                             ₹{setup.currentPrice.toLocaleString('en-IN')}
                           </span>
                           <span
-                            className={`font-mono text-xs font-semibold ${setup.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                              }`}
+                            className={`font-mono text-[10px] font-semibold ${
+                              setup.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
                           >
                             {setup.change >= 0 ? `+${setup.change}%` : `${setup.change}%`}
                           </span>
                         </div>
-                        {/* Score Pill */}
-                        <div className="mt-1 flex items-center justify-end space-x-1">
-                          <span className="rounded-md bg-rose-950/80 px-2 py-0.5 text-[10px] font-mono font-bold text-rose-400 border border-rose-800/50 shadow-sm">
-                            ★ {setup.score}/100 Quality
+                        <div className="mt-0.5 flex items-center justify-end">
+                          <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[9px] font-mono font-semibold text-rose-400">
+                            {setup.score}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Middle Row: Zone Box Metrics */}
-                    <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-xl bg-slate-950/70 p-2.5 border border-slate-800/60 text-xs">
+                    <div className="mt-2 grid grid-cols-3 gap-2 rounded-lg bg-slate-950/50 px-2.5 py-2 border border-slate-800/50">
                       <div>
-                        <div className="text-[10px] text-slate-400">Order Block Zone</div>
-                        <div className="font-mono font-semibold text-rose-300">
-                          ₹{setup.zoneBottom} - ₹{setup.zoneTop}
+                        <div className="text-[10px] text-slate-500">Zone</div>
+                        <div className="mt-0.5 font-mono text-[11px] font-semibold text-rose-300 truncate">
+                          ₹{setup.zoneBottom}–{setup.zoneTop}
                         </div>
                       </div>
-
                       <div>
-                        <div className="text-[10px] text-slate-400">Distance to Zone</div>
-                        <div className="font-mono font-semibold text-slate-200">
+                        <div className="text-[10px] text-slate-500">Distance</div>
+                        <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-200">
                           {setup.distancePercent}%
                         </div>
                       </div>
-
                       <div>
-                        <div className="text-[10px] text-slate-400">Liquidity Target</div>
-                        <div className="font-mono font-semibold text-cyan-400">
+                        <div className="text-[10px] text-slate-500">Target</div>
+                        <div className="mt-0.5 font-mono text-[11px] font-semibold text-cyan-400 truncate">
                           ₹{setup.liquidityTarget}
                         </div>
                       </div>
                     </div>
 
-                    {/* Footer Row: Structure status & View Chart */}
-                    <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
-                      <div className="flex items-center space-x-2">
-                        <span className="flex items-center text-rose-400 font-medium">
-                          <Sparkles className="mr-1 h-3 w-3" />
-                          {setup.testCount === 0 ? 'Fresh Untouched Zone' : `Tested ${setup.testCount}x`}
+                    <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate text-rose-400/90">
+                          {setup.testCount === 0 ? 'Fresh' : `Tested ${setup.testCount}×`}
                         </span>
-                        <span>•</span>
-                        <span className="font-mono">{setup.volumeRatio}x Vol Surge</span>
+                        <span className="text-slate-600">·</span>
+                        <span className="font-mono shrink-0">{setup.volumeRatio}× vol</span>
                       </div>
-
-                      <button className="flex items-center space-x-1 text-slate-400 group-hover:text-rose-400 transition-colors font-medium">
-                        <span>View Chart</span>
-                        <Maximize2 className="h-3 w-3" />
-                      </button>
+                      <span className="inline-flex items-center gap-1 text-slate-500 group-hover:text-rose-400 transition-colors shrink-0">
+                        Chart <Maximize2 className="h-2.5 w-2.5" />
+                      </span>
                     </div>
                   </div>
                 );
@@ -382,38 +363,31 @@ export default function ScreenerBoard({
         </div>
       </div>
 
-      {/* Membership limit banner */}
       {!membership.isPro && (
-        <div className="rounded-3xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950/40 via-slate-900 to-blue-950/40 p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-          <div className="flex items-center space-x-3.5 text-left">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-950 text-cyan-400 border border-cyan-800">
-              <Lock className="h-6 w-6" />
+        <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-3.5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-slate-400">
+              <Lock className="h-3.5 w-3.5" />
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center flex-wrap gap-2">
-                <span>
-                  {membership.label}: showing {displayBullish.length + displayBearish.length} of{' '}
-                  {filteredBullish.length + filteredBearish.length} setups
-                  {hiddenCount > 0 ? ` (${hiddenCount} locked)` : ''}
-                </span>
-                <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30 uppercase">
-                  {membership.key} limit
-                </span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Allowed timeframes: {membership.timeframesAllowed.join(', ') || 'none'}. Max stocks:{' '}
-                {membership.maxStocksVisible}. {membership.upgradeHint}
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold text-white">
+                Showing {displayBullish.length + displayBearish.length} of{' '}
+                {filteredBullish.length + filteredBearish.length}
+                {hiddenCount > 0 ? ` · ${hiddenCount} locked` : ''}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                {membership.label} · TF {membership.timeframesAllowed.join(', ') || '—'} · max{' '}
+                {membership.maxStocksVisible}
               </p>
             </div>
           </div>
-
           <button
             type="button"
             onClick={onOpenPricing}
-            className="flex items-center space-x-2 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-500 px-5 py-2.5 text-xs font-bold text-black hover:opacity-95 transition-opacity shadow-lg shadow-cyan-500/20 shrink-0"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-2 text-[11px] font-bold text-black hover:bg-amber-400 shrink-0"
           >
-            <Sparkles className="h-4 w-4" />
-            <span>Upgrade Membership</span>
+            <Sparkles className="h-3.5 w-3.5" />
+            Upgrade
           </button>
         </div>
       )}

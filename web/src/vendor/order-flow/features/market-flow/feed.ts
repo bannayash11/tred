@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getLatestTradingSessionDate, isMarketSessionTime } from '@/lib/marketSession';
 import type { Underlying } from '@/lib/underlyings';
 import { combineMonths, type FuturesMonth, type FuturesSeries } from '../options-scanner/futuresModel';
@@ -130,7 +130,8 @@ export function useMarketFeed() {
   return { market, loading: !market, error, status, rescan: () => setTick((value) => value + 1) };
 }
 
-const WORKERS = 6;
+const WORKERS_LIVE = 6;
+const WORKERS_AFTER = 2;
 
 /** Each underlying's futures: read six at a time, and again every minute or two while the numbers move. (same as order-flow-main) */
 export function useFuturesFeed(symbols: readonly string[], enabled: boolean, status: FeedStatus | null) {
@@ -143,14 +144,24 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
   const statusRef = useRef(status);
   statusRef.current = status;
 
+  const loaded = useMemo(() => {
+    let n = 0;
+    for (const value of series.values()) if (value != null) n += 1;
+    return n;
+  }, [series]);
+
   useEffect(() => {
     if (!enabled) return undefined;
-    const every = statusRef.current?.provider.alwaysLive ? 60_000 : 120_000;
+    const every = statusRef.current?.provider.alwaysLive ? 60_000 : 90_000;
     const timer = window.setInterval(() => {
-      if (visible() && moving(statusRef.current)) setTick((value) => value + 1);
+      if (!visible()) return;
+      // Keep catch-up after market close until every underlying has futures
+      // (today's session candles are still available; otherwise the board stays sparse).
+      const incomplete = loaded < symbols.length;
+      if (moving(statusRef.current) || incomplete) setTick((value) => value + 1);
     }, every);
     return () => window.clearInterval(timer);
-  }, [enabled, status]);
+  }, [enabled, status, loaded, symbols.length]);
 
   useEffect(() => {
     if (!enabled || !symbols.length) return undefined;
@@ -179,7 +190,8 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
     const worker = async () => {
       while (cursor < symbols.length && !cancelled) await read(symbols[cursor++]);
     };
-    void Promise.all(Array.from({ length: Math.min(WORKERS, symbols.length) }, worker));
+    const workers = moving(statusRef.current) ? WORKERS_LIVE : WORKERS_AFTER;
+    void Promise.all(Array.from({ length: Math.min(workers, symbols.length) }, worker));
     return () => {
       cancelled = true;
     };

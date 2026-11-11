@@ -47,9 +47,9 @@ export default function OrderFlow() {
     return <div className="p-8 text-sm text-slate-400">Loading Order Flow…</div>;
   }
 
-  /* Full-bleed host — original MarketFlowPage owns layout/theme; no card chrome. */
+  /* Full-bleed host — site chrome hidden on this route; MarketFlowPage owns layout. */
   return (
-    <div className="order-flow-host" style={{ minHeight: 'calc(100vh - 4.5rem)' }}>
+    <div className="order-flow-host" style={{ minHeight: '100vh' }}>
       <MarketFlowPage universe={universe} />
     </div>
   );

@@ -17,16 +17,27 @@ export function useFitScrollerHeight(page: RefObject<HTMLElement | null>, enable
   useLayoutEffect(() => {
     const node = page.current;
     if (!node) return undefined;
+    if (!enabled) {
+      node.style.removeProperty('--ui-page-fit-h');
+      return undefined;
+    }
+    // Standalone Order Flow (tred PublicLayout) has no `.dashboard-body` —
+    // size to the visible viewport below the page's top edge.
     const scroller = node.closest<HTMLElement>('.dashboard-body');
-    if (!enabled || !scroller) { node.style.removeProperty('--ui-page-fit-h'); return undefined; }
     const measure = () => {
-      const above = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const fit = Math.floor(scroller.clientHeight - above);
+      const top = node.getBoundingClientRect().top;
+      const fit = scroller
+        ? Math.floor(
+            scroller.clientHeight -
+              (top - scroller.getBoundingClientRect().top + scroller.scrollTop),
+          )
+        : Math.floor(window.innerHeight - top);
       if (fit > 0) node.style.setProperty('--ui-page-fit-h', `${fit}px`);
     };
     measure();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
-    observer?.observe(scroller);
+    if (scroller) observer?.observe(scroller);
+    else observer?.observe(document.documentElement);
     window.addEventListener('resize', measure);
     return () => {
       observer?.disconnect();

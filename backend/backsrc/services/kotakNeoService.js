@@ -467,6 +467,12 @@ class KotakNeoService {
 
     const boot = async () => {
       await this.ensureSession();
+      // After hours: skip SFeed — Matrix auth flaps burn rate limits needed for Order Flow day's fill.
+      const { isMarketSessionTime } = await import('./orderFlow/marketSession.js');
+      if (!isMarketSessionTime(Date.now())) {
+        console.log('[KotakNeoService] Outside session — SFeed deferred; REST poll only for bootstrap.');
+        return;
+      }
       const startedWs = this.startFeedWebSocket(onTickCallback);
       if (startedWs) {
         console.log('[KotakNeoService] Starting Kotak SFeed WebSocket (live ticks)…');

@@ -54,19 +54,25 @@ export const FlowSectors = memo(function FlowSectors({ sectors, split, flow }: F
       </nav>
     );
   }
-  const up = measured.filter(sector => (sector.changePct ?? 0) >= 0);
-  const down = measured.filter(sector => (sector.changePct ?? 0) < 0);
+  // Green from the top (highest first); red from the bottom (worst last).
+  const up = measured
+    .filter(sector => (sector.changePct ?? 0) >= 0)
+    .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
+  const down = measured
+    .filter(sector => (sector.changePct ?? 0) < 0)
+    .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
   return (
     <nav className="mf-sectors is-split" aria-label="Sectors, leader to laggard">
       <div className="mf-sectors__half is-up">
         {flow && <FlowSpread flow={flow} />}
-        {/* The title rides with the list down to the zero rule. */}
+        <h3 className="mf-sectors__title">Sectors <small>median move</small></h3>
+        {list(up, 'Sectors up', 'None up')}
+      </div>
+      <div className="mf-sectors__half is-down">
         <div className="mf-sectors__end">
-          <h3 className="mf-sectors__title">Sectors <small>median move</small></h3>
-          {list(up, 'Sectors up', 'None up')}
+          {list(down, 'Sectors down', 'None down')}
         </div>
       </div>
-      <div className="mf-sectors__half is-down">{list(down, 'Sectors down', 'None down')}</div>
     </nav>
   );
 });

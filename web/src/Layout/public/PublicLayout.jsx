@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import Header from './Header';
 import Footer from './Footer';
@@ -24,6 +24,8 @@ import { setPlans } from '../../store/slices/contentSlice';
 export default function PublicLayout() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isOrderFlow = location.pathname.startsWith('/order-flow');
   const authUser = useSelector((state) => state.auth.user);
   const isAuthenticated = useSelector((state) => state.auth.isAuthenticated);
   const authToken = useSelector((state) => state.auth.token);
@@ -214,24 +216,33 @@ export default function PublicLayout() {
         <AnnouncementBanner text={announcement} onClose={() => setAnnouncement('')} />
       )}
 
-      {/* Live Market Scrolling Ticker Tape Slider */}
-      <MarketTickerBar
-        niftyData={niftyData}
-        bankNiftyData={bankNiftyData}
-        stocks={screenerDataState?.allStocks}
-        onSelectStock={openStockChart}
-      />
+      {!isOrderFlow && (
+        <MarketTickerBar
+          niftyData={niftyData}
+          bankNiftyData={bankNiftyData}
+          stocks={screenerDataState?.allStocks}
+          onSelectStock={openStockChart}
+        />
+      )}
 
-      <Header
-        user={user}
-        onOpenAuth={goToLogin}
-        onOpenPricing={() => setShowPricingModal(true)}
-        onLogout={() => setShowLogoutConfirm(true)}
-        niftyData={niftyData}
-        bankNiftyData={bankNiftyData}
-      />
+      {!isOrderFlow && (
+        <Header
+          user={user}
+          onOpenAuth={goToLogin}
+          onOpenPricing={() => setShowPricingModal(true)}
+          onLogout={() => setShowLogoutConfirm(true)}
+          niftyData={niftyData}
+          bankNiftyData={bankNiftyData}
+        />
+      )}
 
-      <main className="flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main
+        className={
+          isOrderFlow
+            ? 'flex-1 w-full min-h-0'
+            : 'flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6'
+        }
+      >
         <Outlet
           context={{
             screenerData: screenerDataState,
@@ -247,7 +258,7 @@ export default function PublicLayout() {
         />
       </main>
 
-      <Footer />
+      {!isOrderFlow && <Footer />}
 
       {showPricingModal && (
         <PricingModal

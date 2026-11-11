@@ -2,7 +2,6 @@ import { memo, useRef, type KeyboardEvent, type PointerEvent as ReactPointerEven
 import { fmtPrice } from '@/utils/formatters';
 import { useFlowFocus } from './flowFocus';
 import { SymbolMark } from '@/components/common/SymbolMark';
-import { demoFeatured } from './demoFeatured';
 import { BuildMark, buildUpText, ChangeText, DotMeter, heatStyle, pctText, TickFlash, signedText, Spark, toneOf } from './FlowParts';
 import { levelText, type FlowStock } from './marketFlowModel';
 
@@ -33,7 +32,7 @@ const WORD: Record<HalfSide, string> = { bullish: 'up', bearish: 'down' };
  * Hover, focus and click go through the board's focus by delegation: one set
  * of listeners for the grid, none per tile.
  */
-export const FlowHalf = memo(function FlowHalf({ side, stocks, featured, holding, floorPct, total }: FlowHalfProps) {
+export const FlowHalf = memo(function FlowHalf({ side, stocks, featured, floorPct, total }: FlowHalfProps) {
   const focus = useFlowFocus();
   const gridRef = useRef<HTMLDivElement>(null);
   const symbolAt = (target: EventTarget | null) => (target as HTMLElement | null)?.closest<HTMLElement>('[data-tile]')?.dataset.sym ?? null;
@@ -85,11 +84,9 @@ export const FlowHalf = memo(function FlowHalf({ side, stocks, featured, holding
           {stocks.map((stock, slot) => <FlowTile key={slot} stock={stock} first={slot === 0} side={side} total={total} />)}
         </div>
       )}
-      {(featured.length > 0 || (holding && stocks.length > 0)) && (
+      {featured.length > 0 && (
         <div className="mf-featured" aria-label={`${TITLE[side]}: the strongest readings`}>
-          {featured.length > 0
-            ? featured.map(stock => <FlowCard key={stock.symbol} stock={stock} side={side} />)
-            : demoFeatured(stocks, side, 2).map(stock => <FlowCard key={`demo:${stock.symbol}`} stock={stock} side={side} demo />)}
+          {featured.map(stock => <FlowCard key={stock.symbol} stock={stock} side={side} />)}
         </div>
       )}
     </section>

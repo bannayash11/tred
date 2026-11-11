@@ -5,21 +5,11 @@ import {
   TrendingUp,
   TrendingDown,
   Flame,
-  Filter,
   Search,
   ExternalLink,
-  Target,
-  Clock,
-  Sparkles,
-  Maximize2,
-  ShieldCheck,
-  Activity,
-  Layers,
   ArrowUpRight,
   ArrowDownRight,
-  Info,
-  Scale,
-  BarChart2
+  Scale
 } from 'lucide-react';
 import { fetchOpeningMomentum, getSocket } from '../services/api';
 import { useSelector } from 'react-redux';
@@ -151,232 +141,74 @@ export default function OpeningMomentumScanner({
   })();
 
   return (
-    <div className="space-y-6">
-      {/* Header Banner & Concept Explanation */}
-      <div className="rounded-3xl border border-slate-800/80 bg-gradient-to-br from-slate-900/90 via-[#0d1424] to-slate-950/80 p-5 sm:p-6 backdrop-blur-xl shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 h-40 w-40 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 h-40 w-40 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative z-10">
-          <div className="space-y-1.5">
-            <div className="flex items-center space-x-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                <Zap className="h-4 w-4" />
-              </span>
-              <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
-                Opening 5-Minute Momentum Scanner
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/20 flex items-center space-x-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>LIVE TICKS</span>
-                </span>
-              </h2>
-            </div>
-            <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-              Captures true post-open institutional follow-through by freezing the <span className="text-slate-200 font-semibold">09:15–09:20 AM candle close</span> as the static reference price.
-              Tracks raw post-open momentum percentage combined with 5-minute Opening Range Breakouts (ORB) and Relative Volume (RVOL).
-            </p>
+    <div className="space-y-4">
+      {/* Compact scanner summary — single dense strip */}
+      <div className="rounded-lg border border-slate-800/70 bg-slate-900/40 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Zap className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <h2 className="text-[12px] font-semibold text-white">5m Momentum</h2>
+            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1 py-0.5 text-[9px] font-bold text-emerald-400">
+              <span className="h-1 w-1 rounded-full bg-emerald-400 animate-pulse" />
+              LIVE
+            </span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <div className="rounded-2xl border border-cyan-800/60 bg-cyan-950/30 px-3.5 py-2 flex items-center space-x-2 text-xs">
-              <Lock className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-              <div>
-                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                  Reference Price Status
-                </div>
-                <div className="font-mono font-bold text-cyan-300">
-                  {data.isFrozen ? `Frozen at ${formatFreezeTime(data.frozenAt)}` : '09:20 Reference Locked'}
-                </div>
-              </div>
-            </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono ml-auto sm:ml-0">
+            <span className="text-slate-500">Universe <span className="text-white font-semibold">{data.stats?.totalTracked || 35}</span></span>
+            <span className="text-slate-500">Avg up <span className="text-emerald-400 font-semibold">{data.stats?.avgGainerMove || '+0.00%'}</span></span>
+            <span className="text-slate-500">Avg down <span className="text-rose-400 font-semibold">{data.stats?.avgLoserMove || '-0.00%'}</span></span>
           </div>
-        </div>
-
-        {/* 4 Macro Velocity Stat Pills */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-800/70">
-          <div className="rounded-2xl bg-slate-950/50 p-3 border border-slate-800/80 space-y-0.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Universe</div>
-            <div className="text-lg font-extrabold text-white font-mono">
-              {data.stats?.totalTracked || 35} <span className="text-xs text-slate-500 font-sans font-normal">F&O Equities</span>
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-slate-950/50 p-3 border border-slate-800/80 space-y-0.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Avg Bullish Velocity</div>
-            <div className="text-lg font-extrabold text-emerald-400 font-mono">
-              {data.stats?.avgGainerMove || '+0.00%'}
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-slate-950/50 p-3 border border-slate-800/80 space-y-0.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-rose-400">Avg Bearish Velocity</div>
-            <div className="text-lg font-extrabold text-rose-400 font-mono">
-              {data.stats?.avgLoserMove || '-0.00%'}
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-slate-950/50 p-3 border border-slate-800/80 space-y-0.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Confirmed Breakouts</div>
-            <div className="text-lg font-extrabold text-cyan-400 font-mono">
-              {(data.stats?.breakoutCount ?? 0) + (data.stats?.breakdownCount ?? 0)} <span className="text-xs text-slate-500 font-sans font-normal">Beyond 5M Range</span>
-            </div>
+          <div className="inline-flex items-center gap-1 text-[10px] text-slate-400 ml-auto">
+            <Lock className="h-3 w-3 text-cyan-400" />
+            <span className="font-mono text-cyan-300">
+              {data.isFrozen ? formatFreezeTime(data.frozenAt) : '09:20'}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* 5-Minute F&O Market Breadth (Advance–Decline Engine vs 09:20 Candle Close) */}
-      <div className="rounded-3xl border border-slate-800/80 bg-gradient-to-br from-slate-900/90 via-[#0a1120] to-slate-950 p-5 backdrop-blur-xl shadow-2xl space-y-4 relative overflow-hidden">
-        <div className="absolute top-0 right-1/4 h-32 w-32 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
-
-        {/* Top Header & Sentiment Pill */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800/70 pb-3.5 relative z-10">
-          <div className="flex items-center space-x-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-              <Scale className="h-5 w-5" />
-            </span>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="text-sm sm:text-base font-extrabold text-white tracking-tight flex items-center gap-2">
-                  5-Minute F&amp;O Market Breadth
-                  <span className="rounded-md bg-cyan-950/70 text-cyan-300 px-2 py-0.5 text-[10px] font-mono font-semibold border border-cyan-800/50">
-                    A/D vs 09:20 Close
-                  </span>
-                </h3>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Participation of F&amp;O universe evaluated strictly against the frozen 09:20 opening candle benchmark
-              </p>
-            </div>
+      {/* Compact breadth — single dense strip */}
+      <div className="rounded-lg border border-slate-800/70 bg-slate-900/40 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Scale className="h-3.5 w-3.5 text-cyan-400" />
+            <h3 className="text-[12px] font-semibold text-white">Market breadth</h3>
+            <span className="text-[10px] text-slate-500 font-mono">vs 09:20</span>
           </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span
-              className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono border ${
-                breadth.sentiment === 'STRONG_BULLISH' || breadth.sentiment === 'MILD_BULLISH'
-                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60 shadow-sm shadow-emerald-950'
-                  : breadth.sentiment === 'STRONG_BEARISH' || breadth.sentiment === 'MILD_BEARISH'
-                  ? 'bg-rose-950/80 text-rose-300 border-rose-700/60 shadow-sm shadow-rose-950'
-                  : 'bg-slate-800/80 text-slate-300 border-slate-700'
-              }`}
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  breadth.sentiment === 'STRONG_BULLISH' || breadth.sentiment === 'MILD_BULLISH'
-                    ? 'bg-emerald-400 animate-pulse'
-                    : breadth.sentiment === 'STRONG_BEARISH' || breadth.sentiment === 'MILD_BEARISH'
-                    ? 'bg-rose-400 animate-pulse'
-                    : 'bg-amber-400'
-                }`}
-              />
-              <span>{breadth.sentimentLabel || 'Balanced Breadth'}</span>
-            </span>
-          </div>
-        </div>
-
-        {/* 4 Stat Cards Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 relative z-10">
-          {/* Card 1: A/D Ratio */}
-          <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-3.5 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">A/D Ratio</span>
-              <span className="text-[10px] font-mono text-slate-500">Breadth</span>
-            </div>
-            <div className="text-xl sm:text-2xl font-black font-mono text-white flex items-baseline space-x-1">
-              <span>{breadth.adRatio}</span>
-              <span className="text-xs text-slate-500 font-sans font-normal">: 1.0</span>
-            </div>
-            <div className="text-[11px] font-mono text-slate-400 flex items-center justify-between">
-              <span>Net Difference:</span>
-              <span className={`font-bold ${breadth.adDifference >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono">
+            <span className="text-slate-500">
+              A/D <span className="text-white font-semibold">{breadth.adRatio}</span>
+              <span className={`ml-1 ${breadth.adDifference >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {breadth.adDifference >= 0 ? `+${breadth.adDifference}` : breadth.adDifference}
               </span>
-            </div>
+            </span>
+            <span className="text-slate-500">
+              Adv <span className="text-emerald-400 font-semibold">{breadth.advances}</span>
+              <span className="text-emerald-400/70 ml-0.5">{breadth.advancePercent}%</span>
+            </span>
+            <span className="text-slate-500">
+              Dec <span className="text-rose-400 font-semibold">{breadth.declines}</span>
+              <span className="text-rose-400/70 ml-0.5">{breadth.declinePercent}%</span>
+            </span>
           </div>
-
-          {/* Card 2: Advances */}
-          <div className="rounded-2xl border border-emerald-900/40 bg-emerald-950/20 p-3.5 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
-                <ArrowUpRight className="h-3 w-3" /> Advances
-              </span>
-              <span className="text-[10px] font-mono font-bold text-emerald-400/80">
-                {breadth.advancePercent}%
-              </span>
-            </div>
-            <div className="text-xl sm:text-2xl font-black font-mono text-emerald-400">
-              {breadth.advances}
-            </div>
-            <div className="text-[11px] text-slate-400">
-              Trading <strong className="text-emerald-300 font-mono">above</strong> 09:20 Close
-            </div>
-          </div>
-
-          {/* Card 3: Declines */}
-          <div className="rounded-2xl border border-rose-900/40 bg-rose-950/20 p-3.5 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1">
-                <ArrowDownRight className="h-3 w-3" /> Declines
-              </span>
-              <span className="text-[10px] font-mono font-bold text-rose-400/80">
-                {breadth.declinePercent}%
-              </span>
-            </div>
-            <div className="text-xl sm:text-2xl font-black font-mono text-rose-400">
-              {breadth.declines}
-            </div>
-            <div className="text-[11px] text-slate-400">
-              Trading <strong className="text-rose-300 font-mono">below</strong> 09:20 Close
-            </div>
-          </div>
-
-          {/* Card 4: Volume & Neutral */}
-          <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-3.5 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Volume Flow</span>
-              <span className="text-[10px] font-mono text-slate-500">5M Vol</span>
-            </div>
-            <div className="text-xl sm:text-2xl font-black font-mono text-cyan-300">
-              {breadth.advanceVolumeRatio}x
-            </div>
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Unchanged:</span>
-              <span className="font-mono text-slate-300 font-semibold">{breadth.unchanged} stocks</span>
-            </div>
-          </div>
+          <span
+            className={`ml-auto inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-semibold border ${
+              breadth.sentiment === 'STRONG_BULLISH' || breadth.sentiment === 'MILD_BULLISH'
+                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                : breadth.sentiment === 'STRONG_BEARISH' || breadth.sentiment === 'MILD_BEARISH'
+                  ? 'bg-rose-500/10 text-rose-300 border-rose-500/25'
+                  : 'bg-slate-800/70 text-slate-300 border-slate-700'
+            }`}
+          >
+            {breadth.sentimentLabel || 'Balanced'}
+          </span>
         </div>
-
-        {/* Visual Split Participation Bar */}
-        <div className="space-y-1.5 pt-1 relative z-10">
-          <div className="flex items-center justify-between text-[11px] font-mono font-semibold">
-            <span className="text-emerald-400 flex items-center gap-1">
-              <span>▲</span> {breadth.advances} Advancing ({breadth.advancePercent}%)
-            </span>
-            {breadth.unchanged > 0 && (
-              <span className="text-slate-400 text-[10px]">
-                {breadth.unchanged} Unchanged ({breadth.unchangedPercent}%)
-              </span>
-            )}
-            <span className="text-rose-400 flex items-center gap-1">
-              ({breadth.declinePercent}%) {breadth.declines} Declining <span>▼</span>
-            </span>
-          </div>
-
-          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-950 border border-slate-800/80 p-0.5 shadow-inner">
-            <div
-              style={{ width: `${breadth.advancePercent}%` }}
-              className="bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-l-full transition-all duration-700 shadow-sm shadow-emerald-500/40"
-            />
-            {breadth.unchanged > 0 && (
-              <div
-                style={{ width: `${breadth.unchangedPercent}%` }}
-                className="bg-slate-600 transition-all duration-500"
-              />
-            )}
-            <div
-              style={{ width: `${breadth.declinePercent}%` }}
-              className="bg-gradient-to-r from-rose-500 to-rose-600 rounded-r-full transition-all duration-700 shadow-sm shadow-rose-500/40"
-            />
-          </div>
+        <div className="mt-1.5 flex h-1 w-full overflow-hidden rounded-full bg-slate-800">
+          <div style={{ width: `${breadth.advancePercent}%` }} className="bg-emerald-500 transition-all" />
+          {breadth.unchanged > 0 && (
+            <div style={{ width: `${breadth.unchangedPercent}%` }} className="bg-slate-600 transition-all" />
+          )}
+          <div style={{ width: `${breadth.declinePercent}%` }} className="bg-rose-500 transition-all" />
         </div>
       </div>
 

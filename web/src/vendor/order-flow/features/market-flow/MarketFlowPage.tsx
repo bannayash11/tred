@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { PageBar } from '@/components/chrome/PageBar';
 import { ThemeToggle } from '@/components/chrome/ThemeToggle';
 import { applyTheme, readStoredTheme } from '@/lib/applyTheme';
@@ -50,13 +51,12 @@ const UNIVERSES: Array<{ value: FlowUniverse; label: string; title: string }> = 
   { value: 'fno', label: 'All F&O', title: 'Every F&O underlying: stocks and indices' },
 ];
 
-/** Same Order Flow wordmark layout; branded for OrderBlock. */
+/** Back only — brand wordmark removed so the board keeps the full strip. */
 const BRAND = (
-  <div className="mf-brand" aria-label="Order Flow">
-    <span className="mf-brand__dot" aria-hidden="true" />
-    <span className="mf-brand__name">Order <em>Flow</em></span>
-    <span className="mf-brand__by">OrderBlock</span>
-  </div>
+  <Link to="/terminal" className="mf-back" aria-label="Back to Terminal">
+    <span className="mf-back__chev" aria-hidden="true" />
+    <span className="mf-back__label">Back</span>
+  </Link>
 );
 
 export function MarketFlowPage({ universe }: MarketFlowPageProps) {

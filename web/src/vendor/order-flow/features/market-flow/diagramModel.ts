@@ -14,23 +14,42 @@ export const SCALE_KNEE = 0.35;
 
 const g = (abs: number) => Math.log1p(abs / SCALE_KNEE);
 
-/** A symmetric compressed scale: change % to y, nought at `zeroY`, `reach` at `half` px from it. Values past the reach are held at the edge. */
-export function compressedScale(reach: number, zeroY: number, half: number) {
-  const top = g(Math.max(reach, 0.05));
-  const y = (pct: number) => zeroY - Math.sign(pct) * (Math.min(g(Math.abs(pct)), top) / top) * half;
-  return y;
+/**
+ * Compressed % → y. `upReach` / `downReach` can differ so a one-sided day
+ * (mild greens, deep reds) does not crush the quiet half against the edge.
+ * Values past each side's reach sit on that edge.
+ */
+export function compressedScale(upReach: number, zeroY: number, half: number, downReach = upReach) {
+  const upTop = g(Math.max(upReach, 0.05));
+  const downTop = g(Math.max(downReach, 0.05));
+  return (pct: number) => {
+    if (pct >= 0) return zeroY - (Math.min(g(pct), upTop) / upTop) * half;
+    return zeroY + (Math.min(g(-pct), downTop) / downTop) * half;
+  };
 }
 
-/** The ticks a compressed scale can carry without crowding: from a fixed ladder, each at least `minPx` from the last and from nought. */
-export function compressedTicks(reach: number, half: number, minPx = 22): number[] {
+/** Signed ticks for an asymmetric compressed scale; each side keeps `minPx` spacing. */
+export function compressedTicks(upReach: number, half: number, minPx = 22, downReach = upReach): number[] {
   const ladder = [0.1, 0.2, 0.5, 1, 2, 3, 5, 8, 10, 15, 20];
-  const y = compressedScale(reach, 0, half);
+  const y = compressedScale(upReach, 0, half, downReach);
   const out: number[] = [];
-  let last = 0;
+  let lastUp = 0;
+  let lastDown = 0;
   for (const value of ladder) {
-    if (value > reach * 1.0001) break;
-    const at = -y(value);
-    if (at - last >= minPx) { out.push(value); last = at; }
+    if (value <= upReach * 1.0001) {
+      const at = -y(value);
+      if (at - lastUp >= minPx) {
+        out.push(value);
+        lastUp = at;
+      }
+    }
+    if (value <= downReach * 1.0001) {
+      const at = y(-value);
+      if (at - lastDown >= minPx) {
+        out.push(-value);
+        lastDown = at;
+      }
+    }
   }
   return out;
 }

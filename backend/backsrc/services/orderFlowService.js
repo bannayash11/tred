@@ -14,11 +14,23 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, '../../data/order-flow');
 const WORKERS = 2;
-const FUTURES_KEEP_MS = 180_000;
+/** Match order-flow-main: futures cache ~60s while the session is live. */
+const FUTURES_KEEP_MS = 60_000;
 const CHAIN_COUNT = 40;
 const CHAIN_CACHE_MS = 90_000;
-/** Kotak market rebuilds are expensive; keep a longer cadence to leave room for futures. */
+/** Kotak market rebuilds are expensive; leave room for /futures. */
 const MARKET_LIVE_MS = Math.max(90_000, Number(process.env.ORDER_FLOW_LIVE_MS) || 120_000);
+
+/** Nifty 50 + NIFTY — build these first so the default board fills like order-flow-main. */
+const NIFTY_50_PRIORITY = new Set([
+  'NIFTY', 'ADANIENT', 'ADANIPORTS', 'APOLLOHOSP', 'ASIANPAINT', 'AXISBANK', 'BAJAJ-AUTO',
+  'BAJFINANCE', 'BAJAJFINSV', 'BEL', 'BHARTIARTL', 'CIPLA', 'COALINDIA', 'DRREDDY', 'EICHERMOT',
+  'ETERNAL', 'GRASIM', 'HCLTECH', 'HDFCBANK', 'HDFCLIFE', 'HINDALCO', 'HINDUNILVR', 'ICICIBANK',
+  'INDIGO', 'INFY', 'ITC', 'JIOFIN', 'JSWSTEEL', 'KOTAKBANK', 'LT', 'M&M', 'MARUTI', 'MAXHEALTH',
+  'NESTLEIND', 'NTPC', 'ONGC', 'POWERGRID', 'RELIANCE', 'SBILIFE', 'SBIN', 'SHRIRAMFIN',
+  'SUNPHARMA', 'TATACONSUM', 'TMPV', 'TATASTEEL', 'TCS', 'TECHM', 'TITAN', 'TRENT', 'ULTRACEMCO',
+  'WIPRO'
+]);
 
 /** Index symbol aliases: our symbol → Kotak underlying / quote mapping */
 const INDEX_META = {
@@ -30,13 +42,13 @@ const INDEX_META = {
 
 /**
  * Equity CM symbol → Kotak F&O underlying name (when different).
- * TATAMOTORS FO expiries return HTTP 400 post-demerger — skip until mapped.
+ * Tata Motors FO lists as TMPV after demerger.
  */
 const FO_UNDERLYING_ALIASES = {
-  // e.g. OLDNAME: 'NEWFO'
+  TATAMOTORS: 'TMPV'
 };
 
-/** Never call Kotak FO expiries/chains for these (CM quotes still OK). */
+/** Never call Kotak FO expiries/chains for these (known dead FO names). */
 const FO_SKIP_SYMBOLS = new Set(['TATAMOTORS']);
 
 const STOCK_LOTS = {
@@ -70,33 +82,99 @@ function num(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function loadUnderlyingsCatalogue() {
+  const candidates = [
+    path.resolve(__dirname, '../../../web/public/underlyings.json'),
+    path.resolve(__dirname, '../../data/order-flow/underlyings.json'),
+    path.resolve(process.cwd(), 'public/underlyings.json'),
+    path.resolve(process.cwd(), 'web/public/underlyings.json')
+  ];
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (Array.isArray(raw?.underlyings) && raw.underlyings.length) {
+        return { file, underlyings: raw.underlyings };
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+/**
+ * Full F&O catalogue (same as order-flow-main underlyings.json).
+ * Kotak quote tokens attached when present; FO calls use underlying name (no token needed).
+ */
 function buildUniverse() {
-  const stocks = (kotakNeoService.tokenMap || [])
-    .filter((t) => t.segment === 'nse_cm')
-    .filter((t) => !FO_SKIP_SYMBOLS.has(t.symbol))
-    .map((t) => ({
-      symbol: t.symbol,
-      name: t.symbol,
-      kind: 'stock',
-      exch: 'NSE',
-      lot: STOCK_LOTS[t.symbol] || 1,
-      sector: 'Equity',
-      kotakUnderlying: FO_UNDERLYING_ALIASES[t.symbol] || t.symbol,
-      quoteToken: t
+  const catalogue = loadUnderlyingsCatalogue();
+  const tokenBySymbol = new Map(
+    (kotakNeoService.tokenMap || [])
+      .filter((t) => t.segment === 'nse_cm')
+      .map((t) => [t.symbol, t])
+  );
+
+  if (!catalogue?.underlyings?.length) {
+    // Fallback: Kotak tokenMap only
+    const stocks = [...tokenBySymbol.values()]
+      .filter((t) => !FO_SKIP_SYMBOLS.has(t.symbol))
+      .map((t) => ({
+        symbol: t.symbol,
+        name: t.symbol,
+        kind: 'stock',
+        exch: 'NSE',
+        lot: STOCK_LOTS[t.symbol] || 1,
+        sector: 'Equity',
+        kotakUnderlying: FO_UNDERLYING_ALIASES[t.symbol] || t.symbol,
+        quoteToken: t
+      }));
+    const indices = Object.entries(INDEX_META).map(([symbol, meta]) => ({
+      symbol,
+      name: symbol,
+      kind: 'index',
+      exch: meta.exch,
+      lot: symbol === 'BANKNIFTY' ? 15 : symbol === 'NIFTY' ? 65 : 25,
+      sector: 'Index',
+      kotakUnderlying: meta.kotak,
+      quoteToken: meta.quote
     }));
+    const universe = [...indices, ...stocks];
+    console.warn(`[OrderFlow] No underlyings.json — Kotak tokenMap fallback · ${universe.length}`);
+    return universe;
+  }
 
-  const indices = Object.entries(INDEX_META).map(([symbol, meta]) => ({
-    symbol,
-    name: symbol,
-    kind: 'index',
-    exch: meta.exch,
-    lot: symbol === 'BANKNIFTY' ? 15 : symbol === 'NIFTY' ? 65 : 25,
-    sector: 'Index',
-    kotakUnderlying: meta.kotak,
-    quoteToken: meta.quote
-  }));
+  const universe = catalogue.underlyings
+    .filter((u) => u?.symbol && (u.kind === 'stock' || u.kind === 'index'))
+    .filter((u) => !FO_SKIP_SYMBOLS.has(u.symbol))
+    .map((u) => {
+      const symbol = String(u.symbol);
+      const indexMeta = INDEX_META[symbol];
+      return {
+        symbol,
+        name: u.name || symbol,
+        kind: u.kind,
+        exch: u.exch || indexMeta?.exch || 'NSE',
+        lot: Number(u.lot) || STOCK_LOTS[symbol] || (symbol === 'BANKNIFTY' ? 15 : symbol === 'NIFTY' ? 65 : 1),
+        sector: u.sector || (u.kind === 'index' ? 'Index' : 'Equity'),
+        baskets: Array.isArray(u.baskets) ? u.baskets : undefined,
+        kotakUnderlying: FO_UNDERLYING_ALIASES[symbol] || indexMeta?.kotak || symbol,
+        quoteToken: tokenBySymbol.get(symbol) || indexMeta?.quote || null
+      };
+    });
 
-  return [...indices, ...stocks];
+  // Nifty 50 / index first — market file fills the board before the long tail.
+  universe.sort((a, b) => {
+    const ap = NIFTY_50_PRIORITY.has(a.symbol) ? 0 : 1;
+    const bp = NIFTY_50_PRIORITY.has(b.symbol) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return a.symbol.localeCompare(b.symbol);
+  });
+
+  console.log(
+    `[OrderFlow] Universe from underlyings.json · ${universe.length} underlyings (Nifty50-first)`
+  );
+  return universe;
 }
 
 function legStrike(row) {
@@ -150,6 +228,9 @@ class OrderFlowService {
     this.disabledFo = new Set(); // symbols that returned FO 400 — skip for session
     this._scheduled = false;
     this._failStreak = 0;
+    this._prefetching = false;
+    this._prefetchQueue = [];
+    this._expanding = false;
   }
 
   async tryStartKotak() {
@@ -234,8 +315,100 @@ class OrderFlowService {
 
     this.state.ready = true;
     this.state.lastError = null;
-    await this.build();
+
+    const session = getLatestTradingSessionDate(new Date());
+    const covered = this.state.latest?.series?.length || 0;
+    const sameSession = this.state.latest?.date === session;
+    // After hours with a usable today's file: warm futures for the dense chart first,
+    // then expand missing All F&O series in the background (image-like sector rail).
+    if (!isMarketSessionTime(Date.now()) && sameSession && covered >= 40) {
+      console.log(
+        `[OrderFlow] After hours — keeping today's market (${covered} series), warming futures + expanding F&O`
+      );
+      const symbols = this.state.latest.series
+        .map((row) => row.s)
+        .sort((a, b) => {
+          const ap = NIFTY_50_PRIORITY.has(a) ? 0 : 1;
+          const bp = NIFTY_50_PRIORITY.has(b) ? 0 : 1;
+          return ap - bp || a.localeCompare(b);
+        });
+      this.prefetchFutures(symbols, session);
+      void this.expandMissingSeries(session);
+    } else {
+      await this.build();
+    }
     this.schedule();
+  }
+
+  /**
+   * After hours: add underlyings missing from today's market file (Nifty50 → All F&O),
+   * without wiping the existing series. Commits every 15 new names so the UI densifies live.
+   */
+  async expandMissingSeries(session) {
+    if (this.state.building || this._expanding) return;
+    const have = new Set((this.state.latest?.series || []).map((row) => row.s));
+    const missing = this.universe.filter((u) => !have.has(u.symbol) && !this.disabledFo.has(u.symbol));
+    if (!missing.length) {
+      console.log('[OrderFlow] All F&O already in market file');
+      return;
+    }
+    this._expanding = true;
+    kotakNeoService.pauseLiveFeed();
+    console.log(`[OrderFlow] Expanding All F&O · ${missing.length} missing`);
+    const series = [...(this.state.latest?.series || [])];
+    const ladders = { ...(this.state.latest?.ladders || {}) };
+    const failed = [];
+    const started = Date.now();
+    const clock = Date.now();
+    let added = 0;
+    try {
+      // One worker after hours — leave RPS for futures prefetch / browser.
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < missing.length) {
+          const u = missing[cursor++];
+          try {
+            let ladder = this.ladderCache.bySymbol.get(u.symbol);
+            if (!ladder) {
+              ladder = (await this.expiriesFor(u)) || [];
+              if (ladder.length) this.ladderCache.bySymbol.set(u.symbol, ladder);
+            }
+            const live = filterLiveExpiries(Array.isArray(ladder) ? ladder : [], clock);
+            ladders[u.symbol] = live;
+            if (!live[0]) continue;
+            const chain = await this.optionChainFor(u, live[0]);
+            const encoded = encodeSeries(u, { ...chain, expiry: chain.expiry || live[0] }, Date.now());
+            if (!encoded) {
+              failed.push(u.symbol);
+              continue;
+            }
+            series.push(encoded);
+            added += 1;
+            if (added % 15 === 0) {
+              this.commitMarketFile(session, series, ladders, started, failed, null, {
+                prefetch: true
+              });
+              console.log(`[OrderFlow] expand progress · ${series.length} series`);
+            }
+          } catch (err) {
+            failed.push(u.symbol);
+            if (String(err.message || '').includes('429')) {
+              await new Promise((r) => setTimeout(r, 15_000));
+            }
+          }
+        }
+      };
+      await worker();
+      if (added > 0) {
+        this.commitMarketFile(session, series, ladders, started, failed, null, { prefetch: true });
+      }
+      console.log(
+        `[OrderFlow] expand done · +${added} (now ${series.length}), failed ${failed.length}, ${Date.now() - started}ms`
+      );
+    } finally {
+      this._expanding = false;
+      kotakNeoService.resumeLiveFeed();
+    }
   }
 
   async maybeFallbackToUpstox(reason) {
@@ -406,7 +579,7 @@ class OrderFlowService {
     return value;
   }
 
-  async futuresForUnderlying(u, session) {
+  async futuresForUnderlying(u, session, { nearOnly = false } = {}) {
     if (this.feed === 'upstox' && this.upstox) {
       return this.throttled(() => this.upstox.futures(u, session));
     }
@@ -425,8 +598,9 @@ class OrderFlowService {
           : [];
 
     const months = [];
+    const monthCap = nearOnly ? 1 : 3;
 
-    for (const row of futRows.slice(0, 3)) {
+    for (const row of futRows.slice(0, monthCap)) {
       const inst = row.inst || row.instrument || {};
       const date = parseFutExpiry(inst.expiryDt || inst.exp || inst.expiry);
       if (!date || date < session) continue;
@@ -462,7 +636,50 @@ class OrderFlowService {
     }
 
     months.sort((a, b) => a.date.localeCompare(b.date));
-    return months.slice(0, 3);
+    return months.slice(0, monthCap);
+  }
+
+  /**
+   * Warm futures cache after a market build so the board gets real lines
+   * (not "Spot only") without waiting on browser waterfall.
+   */
+  prefetchFutures(symbols, session) {
+    if (!symbols?.length) return;
+    this._prefetchQueue = this._prefetchQueue || [];
+    const seen = new Set(this._prefetchQueue);
+    for (const symbol of symbols) {
+      if (!seen.has(symbol)) {
+        seen.add(symbol);
+        this._prefetchQueue.push(symbol);
+      }
+    }
+    if (this._prefetching) return;
+    this._prefetching = true;
+    const workers = 2;
+    const drain = async () => {
+      const list = this._prefetchQueue;
+      this._prefetchQueue = [];
+      let cursor = 0;
+      const total = list.length;
+      const run = async () => {
+        while (cursor < list.length) {
+          const symbol = list[cursor++];
+          try {
+            await this.getFutures(symbol, session, { nearOnly: true });
+          } catch {
+            /* skip — client may retry */
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: workers }, run));
+      console.log(`[OrderFlow] futures prefetch done · ${total} symbols`);
+      if (this._prefetchQueue.length) {
+        await drain();
+      }
+    };
+    drain().finally(() => {
+      this._prefetching = false;
+    });
   }
 
   hhmmOf(at) {
@@ -499,6 +716,85 @@ class OrderFlowService {
     }
   }
 
+  commitMarketFile(session, series, ladders, started, failed, firstError, { prefetch = false } = {}) {
+    const at = Date.now();
+    const sorted = [...series].sort((a, b) => a.s.localeCompare(b.s));
+    const minutes = isMarketSessionTime(at)
+      ? this.storeMinute(
+          session,
+          at,
+          JSON.stringify(marketFile({ at, date: session, series: sorted, minutes: [], ladders }))
+        )
+      : this.readMinutes(session);
+    const file = marketFile({ at, date: session, series: sorted, minutes, ladders });
+    this.state.latest = file;
+    this.state.latestJson = JSON.stringify(file);
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(path.join(DATA_DIR, 'latest.json'), this.state.latestJson);
+    this.pruneOldDays(session);
+    this.state.lastBuild = {
+      at,
+      ms: Date.now() - started,
+      series: series.length,
+      failed: failed.length,
+      failedSymbols: failed.slice(0, 20),
+      firstError,
+      provider: this.provider.id
+    };
+    this.state.lastError = null;
+    this._failStreak = 0;
+    console.log(
+      `[OrderFlow] market file (${this.provider.id}): ${series.length} series, ${failed.length} failed, ${Date.now() - started}ms` +
+        (firstError ? ` (first: ${firstError})` : '')
+    );
+    if (prefetch) {
+      const prefetchSymbols = sorted
+        .map((row) => row.s)
+        .sort((a, b) => {
+          const ap = NIFTY_50_PRIORITY.has(a) ? 0 : 1;
+          const bp = NIFTY_50_PRIORITY.has(b) ? 0 : 1;
+          return ap - bp || a.localeCompare(b);
+        });
+      // Prefer Nifty 50 warm-up first so the default board drops "Spot only" quickly.
+      this.prefetchFutures(prefetchSymbols, session);
+    }
+    return sorted;
+  }
+
+  async scanUniverse(list, clock, series, ladders, failed) {
+    let firstError = null;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < list.length) {
+        const u = list[cursor++];
+        if (this.disabledFo.has(u.symbol)) continue;
+        try {
+          let ladder = this.ladderCache.bySymbol.get(u.symbol);
+          if (!ladder) {
+            ladder = (await this.expiriesFor(u)) || [];
+            if (ladder.length) this.ladderCache.bySymbol.set(u.symbol, ladder);
+            else if (this.disabledFo.has(u.symbol)) continue;
+          }
+          const live = filterLiveExpiries(Array.isArray(ladder) ? ladder : [], clock);
+          ladders[u.symbol] = live;
+          if (!live[0]) continue;
+          const chain = await this.optionChainFor(u, live[0]);
+          const encoded = encodeSeries(u, { ...chain, expiry: chain.expiry || live[0] }, Date.now());
+          if (encoded) {
+            const idx = series.findIndex((row) => row.s === encoded.s);
+            if (idx >= 0) series[idx] = encoded;
+            else series.push(encoded);
+          } else failed.push(u.symbol);
+        } catch (error) {
+          failed.push(u.symbol);
+          firstError ??= String(error?.message || error);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: WORKERS }, worker));
+    return firstError;
+  }
+
   async build() {
     if (this.state.building) return;
     if (!this.state.ready) return;
@@ -517,69 +813,32 @@ class OrderFlowService {
     const series = [];
     const ladders = {};
     const failed = [];
-    let firstError = null;
-    let cursor = 0;
 
-    const worker = async () => {
-      while (cursor < this.universe.length) {
-        const u = this.universe[cursor++];
-        if (this.disabledFo.has(u.symbol)) continue;
-        try {
-          let ladder = this.ladderCache.bySymbol.get(u.symbol);
-          if (!ladder) {
-            ladder = (await this.expiriesFor(u)) || [];
-            if (ladder.length) this.ladderCache.bySymbol.set(u.symbol, ladder);
-            else if (this.disabledFo.has(u.symbol)) continue;
-          }
-          const live = filterLiveExpiries(Array.isArray(ladder) ? ladder : [], clock);
-          ladders[u.symbol] = live;
-          if (!live[0]) continue;
-          const chain = await this.optionChainFor(u, live[0]);
-          const encoded = encodeSeries(u, { ...chain, expiry: chain.expiry || live[0] }, Date.now());
-          if (encoded) series.push(encoded);
-          else failed.push(u.symbol);
-        } catch (error) {
-          failed.push(u.symbol);
-          firstError ??= String(error?.message || error);
-        }
-      }
-    };
+    // Kotak: publish Nifty 50 first (order-flow-main board), then fill All F&O.
+    // Upstox: one pass over the full catalogue.
+    const priority = this.universe.filter((u) => NIFTY_50_PRIORITY.has(u.symbol));
+    const rest =
+      this.feed === 'kotak'
+        ? this.universe.filter((u) => !NIFTY_50_PRIORITY.has(u.symbol))
+        : [];
+    const primary = this.feed === 'kotak' ? priority : this.universe;
 
     try {
-      await Promise.all(Array.from({ length: WORKERS }, worker));
+      let firstError = await this.scanUniverse(primary, clock, series, ladders, failed);
       if (!series.length) {
         throw new Error(firstError ? `No underlying answered: ${firstError}` : 'No underlying answered.');
       }
-      const at = Date.now();
-      const sorted = series.sort((a, b) => a.s.localeCompare(b.s));
-      const minutes = isMarketSessionTime(at)
-        ? this.storeMinute(
-            session,
-            at,
-            JSON.stringify(marketFile({ at, date: session, series: sorted, minutes: [], ladders }))
-          )
-        : this.readMinutes(session);
-      const file = marketFile({ at, date: session, series: sorted, minutes, ladders });
-      this.state.latest = file;
-      this.state.latestJson = JSON.stringify(file);
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(path.join(DATA_DIR, 'latest.json'), this.state.latestJson);
-      this.pruneOldDays(session);
-      this.state.lastBuild = {
-        at,
-        ms: Date.now() - started,
-        series: series.length,
-        failed: failed.length,
-        failedSymbols: failed.slice(0, 20),
-        firstError,
-        provider: this.provider.id
-      };
-      this.state.lastError = null;
-      this._failStreak = 0;
-      console.log(
-        `[OrderFlow] market file (${this.provider.id}): ${series.length} series, ${failed.length} failed, ${Date.now() - started}ms` +
-          (firstError ? ` (first: ${firstError})` : '')
-      );
+      // Publish Nifty 50 early + warm its futures; then fill All F&O.
+      this.commitMarketFile(session, series, ladders, started, failed, firstError, {
+        prefetch: true
+      });
+
+      if (rest.length) {
+        firstError = (await this.scanUniverse(rest, clock, series, ladders, failed)) || firstError;
+        this.commitMarketFile(session, series, ladders, started, failed, firstError, {
+          prefetch: true
+        });
+      }
 
       // If Kotak mostly fails, switch to Upstox when available
       const failRatio = failed.length / Math.max(1, series.length + failed.length);
@@ -620,9 +879,11 @@ class OrderFlowService {
     this._scheduled = true;
     const tick = async () => {
       const live = isMarketSessionTime(Date.now());
-      // Longer Kotak cadence leaves the request gate free for /futures
-      // (popup "Loading future…" was stuck behind continuous market rebuilds).
-      const wait = live ? MARKET_LIVE_MS : 60 * 60_000;
+      const covered = this.state.latest?.series?.length || 0;
+      const incomplete = covered < Math.min(this.universe.length, 180);
+      // Live: normal cadence. After hours: if today's board is still thin, keep filling
+      // every few minutes (session chains/futures still answer) instead of waiting an hour.
+      const wait = live ? MARKET_LIVE_MS : incomplete ? 3 * 60_000 : 60 * 60_000;
       setTimeout(async () => {
         await this.build();
         tick();
@@ -663,7 +924,7 @@ class OrderFlowService {
     return fs.readFileSync(file, 'utf8');
   }
 
-  async getFutures(symbol, session) {
+  async getFutures(symbol, session, { nearOnly = false } = {}) {
     const u = this.bySymbol.get(symbol);
     if (!u) {
       const err = new Error('Unknown underlying.');
@@ -680,9 +941,17 @@ class OrderFlowService {
     const key = `${symbol}|${session}`;
     const held = this.futuresCache.get(key);
     const live = isMarketSessionTime(Date.now());
-    if (held && (!live || Date.now() - held.at < FUTURES_KEEP_MS)) return held.value;
+    if (held && (!live || Date.now() - held.at < FUTURES_KEEP_MS)) {
+      const cached = await held.value;
+      // Prefetch may store near-month only; upgrade when the client asks for full.
+      if (nearOnly || (cached?.months?.length || 0) >= 2) return cached;
+    }
 
-    const value = this.futuresForUnderlying(u, session).then((months) => ({ symbol, session, months }));
+    const value = this.futuresForUnderlying(u, session, { nearOnly }).then((months) => ({
+      symbol,
+      session,
+      months
+    }));
     this.futuresCache.set(key, { at: Date.now(), value });
     value.catch(() => this.futuresCache.delete(key));
     if (this.futuresCache.size > 400) this.futuresCache.delete(this.futuresCache.keys().next().value);

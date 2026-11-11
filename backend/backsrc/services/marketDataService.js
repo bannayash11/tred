@@ -279,6 +279,12 @@ export class MarketDataService {
   }
 
   async warmRealCandles() {
+    // After hours: leave Kotak RPS for Order Flow day's futures fill (dense board).
+    const { isMarketSessionTime } = await import('./orderFlow/marketSession.js');
+    if (!isMarketSessionTime(Date.now())) {
+      console.log('[MarketDataService] Outside session — skipping candle warm (Order Flow priority).');
+      return;
+    }
     // Wait for Order Flow's first/current build so we don't fight for Kotak RPS
     for (let i = 0; i < 120 && orderFlowService.state?.building; i++) {
       await new Promise((r) => setTimeout(r, 1000));

@@ -58,6 +58,7 @@ export class KotakFeedWs {
     this.alive = false;
     this.reconnectTimer = null;
     this.reconnectAttempt = 0;
+    this.authFailCount = 0;
     this._closed = false;
   }
 
@@ -149,10 +150,14 @@ export class KotakFeedWs {
     });
   }
 
-  scheduleReconnect() {
+  scheduleReconnect(forcedWaitMs) {
     if (this._closed) return;
     if (this.reconnectTimer) return;
-    const wait = Math.min(30_000, 1500 * 2 ** Math.min(this.reconnectAttempt, 4));
+    // Auth storms (Matrix Auth failed) were burning Kotak rate limits and starving Order Flow REST.
+    const wait =
+      forcedWaitMs != null
+        ? forcedWaitMs
+        : Math.min(60_000, 2000 * 2 ** Math.min(this.reconnectAttempt, 5));
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -163,12 +168,22 @@ export class KotakFeedWs {
   handleControl(msg) {
     const code = Number(msg?.message_code);
     if (code === 1120) {
-      this.onStatus?.({ ok: false, message: msg?.message || 'Kotak SFeed auth failed' });
+      this.authFailCount += 1;
+      this.onStatus?.({
+        ok: false,
+        message: msg?.message || 'Kotak SFeed auth failed'
+      });
       try {
+        this.ws?.removeAllListeners();
         this.ws?.close();
       } catch {
         /* ignore */
       }
+      this.ws = null;
+      this.alive = false;
+      // After a few Matrix auth failures, cool down hard so REST (Order Flow) can finish today's session.
+      const coolDown = this.authFailCount >= 3 ? 15 * 60_000 : 60_000;
+      this.scheduleReconnect(coolDown);
       return;
     }
 
@@ -183,6 +198,7 @@ export class KotakFeedWs {
       if (code === 1117) {
         this.alive = true;
         this.reconnectAttempt = 0;
+        this.authFailCount = 0;
         this.onStatus?.({ ok: true, message: 'Kotak SFeed authenticated' });
         this.subscribeAll();
       }
