@@ -230,6 +230,7 @@ class OrderFlowService {
     this._failStreak = 0;
     this._prefetching = false;
     this._prefetchQueue = [];
+    this._prefetchDrain = null;
     this._expanding = false;
   }
 
@@ -266,6 +267,29 @@ class OrderFlowService {
       this.state.latest = JSON.parse(raw);
     } catch {
       /* first run */
+    }
+    // If a mid-build publish shrunk latest, prefer today's fullest minute snapshot.
+    try {
+      const session = getLatestTradingSessionDate(new Date());
+      const minutes = this.readMinutes(session);
+      let best = this.state.latest?.date === session ? this.state.latest : null;
+      for (const [hhmm] of minutes) {
+        const body = this.getMinuteFile(session, hhmm);
+        if (!body) continue;
+        const file = JSON.parse(body);
+        const n = file?.series?.length || 0;
+        if (n > (best?.series?.length || 0)) best = file;
+      }
+      if (best && (best.series?.length || 0) > (this.state.latest?.series?.length || 0)) {
+        this.state.latest = best;
+        this.state.latestJson = JSON.stringify(best);
+        fs.writeFileSync(path.join(DATA_DIR, 'latest.json'), this.state.latestJson);
+        console.log(
+          `[OrderFlow] Recovered fuller market from minute store · ${best.series.length} series`
+        );
+      }
+    } catch {
+      /* ignore recovery errors */
     }
 
     // auto (default): Kotak first, Upstox fallback | kotak | upstox
@@ -319,11 +343,12 @@ class OrderFlowService {
     const session = getLatestTradingSessionDate(new Date());
     const covered = this.state.latest?.series?.length || 0;
     const sameSession = this.state.latest?.date === session;
-    // After hours with a usable today's file: warm futures for the dense chart first,
-    // then expand missing All F&O series in the background (image-like sector rail).
-    if (!isMarketSessionTime(Date.now()) && sameSession && covered >= 40) {
+    const live = isMarketSessionTime(Date.now());
+    // Serve a usable today's file immediately — never block the API on a full Kotak rebuild.
+    // Live: refresh in the background. After hours: warm futures + expand All F&O.
+    if (sameSession && covered >= 40) {
       console.log(
-        `[OrderFlow] After hours — keeping today's market (${covered} series), warming futures + expanding F&O`
+        `[OrderFlow] ${live ? 'Live' : 'After hours'} — serving cached market (${covered} series), refreshing in background`
       );
       const symbols = this.state.latest.series
         .map((row) => row.s)
@@ -332,10 +357,25 @@ class OrderFlowService {
           const bp = NIFTY_50_PRIORITY.has(b) ? 0 : 1;
           return ap - bp || a.localeCompare(b);
         });
-      this.prefetchFutures(symbols, session);
-      void this.expandMissingSeries(session);
+      // Hydrate memory from disk so cards with cached candles paint instantly.
+      this.hydrateFuturesFromDisk(session, symbols);
+      // Futures charts first — pause quote/SFeed so Kotak RPS fills candle cache fast.
+      kotakNeoService.pauseLiveFeed();
+      const head = symbols.slice(0, 12);
+      const tail = symbols.slice(12);
+      void this.prefetchFutures(head, session)
+        .then(() => this.prefetchFutures(tail, session))
+        .catch(() => {})
+        .finally(() => {
+          kotakNeoService.resumeLiveFeed();
+        })
+        .then(() => {
+          if (!live) return this.expandMissingSeries(session);
+          return this.build();
+        });
     } else {
-      await this.build();
+      // No usable cache — still don't block initialize; publish as series arrive.
+      void this.build();
     }
     this.schedule();
   }
@@ -639,12 +679,56 @@ class OrderFlowService {
     return months.slice(0, monthCap);
   }
 
+  futuresDiskPath(symbol, session) {
+    return path.join(DATA_DIR, 'futures', session, `${symbol}.json`);
+  }
+
+  hydrateFuturesFromDisk(session, symbols) {
+    let n = 0;
+    for (const symbol of symbols || []) {
+      const key = `${symbol}|${session}`;
+      if (this.futuresCache.has(key)) continue;
+      const disk = this.readFuturesDisk(symbol, session);
+      if (!this.hasFuturesCandles(disk)) continue;
+      this.futuresCache.set(key, { at: Date.now(), value: Promise.resolve(disk) });
+      n += 1;
+    }
+    if (n) console.log(`[OrderFlow] Hydrated ${n} futures from disk`);
+  }
+
+  readFuturesDisk(symbol, session) {
+    try {
+      const raw = fs.readFileSync(this.futuresDiskPath(symbol, session), 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed?.months?.length) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  writeFuturesDisk(symbol, session, payload) {
+    try {
+      if (!payload?.months?.some((m) => m?.candles?.length)) return;
+      const dir = path.join(DATA_DIR, 'futures', session);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.futuresDiskPath(symbol, session), JSON.stringify(payload));
+    } catch {
+      /* ignore disk errors */
+    }
+  }
+
+  hasFuturesCandles(payload) {
+    return Boolean(payload?.months?.some((m) => Array.isArray(m?.candles) && m.candles.length > 0));
+  }
+
   /**
    * Warm futures cache after a market build so the board gets real lines
    * (not "Spot only") without waiting on browser waterfall.
+   * Returns a promise that resolves when the current queue is drained.
    */
   prefetchFutures(symbols, session) {
-    if (!symbols?.length) return;
+    if (!symbols?.length) return Promise.resolve();
     this._prefetchQueue = this._prefetchQueue || [];
     const seen = new Set(this._prefetchQueue);
     for (const symbol of symbols) {
@@ -653,33 +737,45 @@ class OrderFlowService {
         this._prefetchQueue.push(symbol);
       }
     }
-    if (this._prefetching) return;
+    if (this._prefetchDrain) return this._prefetchDrain;
     this._prefetching = true;
-    const workers = 2;
+    // One worker under Kotak pressure — parallel workers just stack 429 backoffs.
+    const workers = 1;
     const drain = async () => {
       const list = this._prefetchQueue;
       this._prefetchQueue = [];
       let cursor = 0;
       const total = list.length;
+      let ok = 0;
       const run = async () => {
         while (cursor < list.length) {
           const symbol = list[cursor++];
           try {
-            await this.getFutures(symbol, session, { nearOnly: true });
+            // Prefer cache/disk first — don't burn Kotak re-fetching warm charts.
+            let payload = await this.getFutures(symbol, session, { nearOnly: true, force: false });
+            if (!this.hasFuturesCandles(payload)) {
+              payload = await this.getFutures(symbol, session, { nearOnly: true, force: true });
+            }
+            if (this.hasFuturesCandles(payload)) ok += 1;
+            if (cursor % 5 === 0 || cursor === list.length) {
+              console.log(`[OrderFlow] futures warm · ${ok}/${total} with candles`);
+            }
           } catch {
             /* skip — client may retry */
           }
         }
       };
-      await Promise.all(Array.from({ length: workers }, run));
-      console.log(`[OrderFlow] futures prefetch done · ${total} symbols`);
+      await Promise.all(Array.from({ length: Math.min(workers, Math.max(1, list.length)) }, run));
+      console.log(`[OrderFlow] futures prefetch done · ${ok}/${total} with candles`);
       if (this._prefetchQueue.length) {
         await drain();
       }
     };
-    drain().finally(() => {
+    this._prefetchDrain = drain().finally(() => {
       this._prefetching = false;
+      this._prefetchDrain = null;
     });
+    return this._prefetchDrain;
   }
 
   hhmmOf(at) {
@@ -761,9 +857,10 @@ class OrderFlowService {
     return sorted;
   }
 
-  async scanUniverse(list, clock, series, ladders, failed) {
+  async scanUniverse(list, clock, series, ladders, failed, { onProgress } = {}) {
     let firstError = null;
     let cursor = 0;
+    let sincePublish = 0;
     const worker = async () => {
       while (cursor < list.length) {
         const u = list[cursor++];
@@ -784,6 +881,12 @@ class OrderFlowService {
             const idx = series.findIndex((row) => row.s === encoded.s);
             if (idx >= 0) series[idx] = encoded;
             else series.push(encoded);
+            sincePublish += 1;
+            // Publish early so the board paints while Kotak is still answering.
+            if (onProgress && sincePublish >= 8 && series.length >= 8) {
+              sincePublish = 0;
+              onProgress(series.length);
+            }
           } else failed.push(u.symbol);
         } catch (error) {
           failed.push(u.symbol);
@@ -810,9 +913,14 @@ class OrderFlowService {
       this.disabledFo.clear();
     }
 
+    // Seed from today's file so progressive publishes never shrink the board mid-rebuild.
     const series = [];
     const ladders = {};
     const failed = [];
+    if (this.state.latest?.date === session && Array.isArray(this.state.latest.series)) {
+      for (const row of this.state.latest.series) series.push(row);
+      Object.assign(ladders, this.state.latest.ladders || {});
+    }
 
     // Kotak: publish Nifty 50 first (order-flow-main board), then fill All F&O.
     // Upstox: one pass over the full catalogue.
@@ -822,9 +930,19 @@ class OrderFlowService {
         ? this.universe.filter((u) => !NIFTY_50_PRIORITY.has(u.symbol))
         : [];
     const primary = this.feed === 'kotak' ? priority : this.universe;
+    const seeded = series.length;
 
     try {
-      let firstError = await this.scanUniverse(primary, clock, series, ladders, failed);
+      const publishProgress = (n) => {
+        // Only publish when we have something useful; never below the seeded count.
+        if (series.length < Math.max(8, seeded)) return;
+        this.commitMarketFile(session, series, ladders, started, failed, null, {
+          prefetch: n >= 20 && series.length >= 20
+        });
+      };
+      let firstError = await this.scanUniverse(primary, clock, series, ladders, failed, {
+        onProgress: publishProgress
+      });
       if (!series.length) {
         throw new Error(firstError ? `No underlying answered: ${firstError}` : 'No underlying answered.');
       }
@@ -834,7 +952,10 @@ class OrderFlowService {
       });
 
       if (rest.length) {
-        firstError = (await this.scanUniverse(rest, clock, series, ladders, failed)) || firstError;
+        firstError =
+          (await this.scanUniverse(rest, clock, series, ladders, failed, {
+            onProgress: publishProgress
+          })) || firstError;
         this.commitMarketFile(session, series, ladders, started, failed, firstError, {
           prefetch: true
         });
@@ -885,6 +1006,11 @@ class OrderFlowService {
       // every few minutes (session chains/futures still answer) instead of waiting an hour.
       const wait = live ? MARKET_LIVE_MS : incomplete ? 3 * 60_000 : 60 * 60_000;
       setTimeout(async () => {
+        // Never interrupt futures candle warm — charts stay on "Loading future…" otherwise.
+        if (this._prefetching) {
+          tick();
+          return;
+        }
         await this.build();
         tick();
       }, wait);
@@ -924,7 +1050,7 @@ class OrderFlowService {
     return fs.readFileSync(file, 'utf8');
   }
 
-  async getFutures(symbol, session, { nearOnly = false } = {}) {
+  async getFutures(symbol, session, { nearOnly = true, force = false } = {}) {
     const u = this.bySymbol.get(symbol);
     if (!u) {
       const err = new Error('Unknown underlying.');
@@ -941,19 +1067,93 @@ class OrderFlowService {
     const key = `${symbol}|${session}`;
     const held = this.futuresCache.get(key);
     const live = isMarketSessionTime(Date.now());
-    if (held && (!live || Date.now() - held.at < FUTURES_KEEP_MS)) {
-      const cached = await held.value;
-      // Prefetch may store near-month only; upgrade when the client asks for full.
-      if (nearOnly || (cached?.months?.length || 0) >= 2) return cached;
+    let good = null;
+
+    // Memory: serve any candle-bearing cache immediately (near-month is enough for charts).
+    if (held) {
+      try {
+        const cached = await held.value;
+        if (this.hasFuturesCandles(cached)) {
+          good = cached;
+          const age = Date.now() - held.at;
+          if (!force && (!live || age < FUTURES_KEEP_MS || this.state.building || this._expanding || this._prefetching)) {
+            return cached;
+          }
+          // Stale-while-revalidate: keep showing candles while a refresh runs.
+          if (!force && live && age >= FUTURES_KEEP_MS) {
+            void this.refreshFutures(symbol, session, key, u);
+            return cached;
+          }
+          if (!force) return cached;
+        }
+      } catch {
+        /* fall through */
+      }
     }
 
-    const value = this.futuresForUnderlying(u, session, { nearOnly }).then((months) => ({
-      symbol,
-      session,
-      months
-    }));
-    this.futuresCache.set(key, { at: Date.now(), value });
-    value.catch(() => this.futuresCache.delete(key));
+    // Disk: survive restarts so cards don't sit on "Loading future…".
+    if (!force && !good) {
+      const disk = this.readFuturesDisk(symbol, session);
+      if (this.hasFuturesCandles(disk)) {
+        good = disk;
+        this.futuresCache.set(key, { at: Date.now(), value: Promise.resolve(disk) });
+        if (live && !this.state.building && !this._prefetching) {
+          void this.refreshFutures(symbol, session, key, u);
+        }
+        return disk;
+      }
+    }
+
+    if (force && good) {
+      return this.refreshFutures(symbol, session, key, u, good);
+    }
+
+    // While market build owns the pipe, only forced prefetch may hit Kotak.
+    if ((this.state.building || this._expanding) && !force) {
+      return good || { symbol, session, months: [] };
+    }
+
+    return this.refreshFutures(symbol, session, key, u, good);
+  }
+
+  /**
+   * Fetch near-month futures. Never deletes a prior good cache on 429/failure
+   * (that was snapping charts back to "Loading future…").
+   */
+  refreshFutures(symbol, session, key, u, fallback = null) {
+    const existing = this.futuresCache.get(key);
+    // Reuse an in-flight refresh.
+    if (existing?.refreshing) return existing.value;
+
+    const value = this.futuresForUnderlying(u, session, { nearOnly: true })
+      .then((months) => {
+        const payload = { symbol, session, months };
+        if (this.hasFuturesCandles(payload)) {
+          this.writeFuturesDisk(symbol, session, payload);
+          this.futuresCache.set(key, { at: Date.now(), value: Promise.resolve(payload) });
+          return payload;
+        }
+        // Empty answer: keep prior candles if we have them.
+        if (fallback && this.hasFuturesCandles(fallback)) {
+          this.futuresCache.set(key, { at: Date.now(), value: Promise.resolve(fallback) });
+          return fallback;
+        }
+        return payload;
+      })
+      .catch((err) => {
+        if (fallback && this.hasFuturesCandles(fallback)) {
+          this.futuresCache.set(key, { at: Date.now(), value: Promise.resolve(fallback) });
+          return fallback;
+        }
+        const disk = this.readFuturesDisk(symbol, session);
+        if (this.hasFuturesCandles(disk)) {
+          this.futuresCache.set(key, { at: Date.now(), value: Promise.resolve(disk) });
+          return disk;
+        }
+        throw err;
+      });
+
+    this.futuresCache.set(key, { at: Date.now(), value, refreshing: true });
     if (this.futuresCache.size > 400) this.futuresCache.delete(this.futuresCache.keys().next().value);
     return value;
   }

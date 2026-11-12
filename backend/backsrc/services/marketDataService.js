@@ -285,8 +285,10 @@ export class MarketDataService {
       console.log('[MarketDataService] Outside session — skipping candle warm (Order Flow priority).');
       return;
     }
-    // Wait for Order Flow's first/current build so we don't fight for Kotak RPS
-    for (let i = 0; i < 120 && orderFlowService.state?.building; i++) {
+    // Wait for Order Flow futures warm + build so chart candles don't fight Kotak RPS
+    for (let i = 0; i < 180; i++) {
+      const busy = orderFlowService.state?.building || orderFlowService._prefetching;
+      if (!busy) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log('[MarketDataService] Warming real 5m candles from Kotak (throttled)…');

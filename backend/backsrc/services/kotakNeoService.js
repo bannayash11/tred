@@ -248,10 +248,29 @@ class KotakNeoService {
 
   pauseLiveFeed() {
     this.pollPaused = true;
+    // Stop SFeed during Order Flow build — Matrix auth flaps + WS traffic steal RPS.
+    try {
+      this.feedWs?.stop();
+    } catch {
+      /* ignore */
+    }
+    this.feedWsAlive = false;
   }
 
   resumeLiveFeed() {
     this.pollPaused = false;
+    // Restart SFeed only in-session; otherwise REST poll stays as fallback.
+    if (this._tickCallback && this.preferWsFeed && !this.feedWsAlive) {
+      void import('./orderFlow/marketSession.js').then(({ isMarketSessionTime }) => {
+        if (!isMarketSessionTime(Date.now())) return;
+        if (this.pollPaused) return;
+        try {
+          this.startFeedWebSocket(this._tickCallback);
+        } catch {
+          /* ignore */
+        }
+      });
+    }
   }
 
   /**
@@ -467,12 +486,15 @@ class KotakNeoService {
 
     const boot = async () => {
       await this.ensureSession();
-      // After hours: skip SFeed — Matrix auth flaps burn rate limits needed for Order Flow day's fill.
+      // SFeed Matrix auth flaps burn rate limits — defer until Order Flow futures are warm.
       const { isMarketSessionTime } = await import('./orderFlow/marketSession.js');
       if (!isMarketSessionTime(Date.now())) {
         console.log('[KotakNeoService] Outside session — SFeed deferred; REST poll only for bootstrap.');
         return;
       }
+      // Give Order Flow ~2 minutes to fill near-month candle cache before WS auth storms.
+      await new Promise((r) => setTimeout(r, 120_000));
+      if (this.pollPaused) return;
       const startedWs = this.startFeedWebSocket(onTickCallback);
       if (startedWs) {
         console.log('[KotakNeoService] Starting Kotak SFeed WebSocket (live ticks)…');

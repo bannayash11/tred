@@ -83,18 +83,42 @@ export function pathOf(line: FlowLine, xOf: (ms: number) => number, yOf: (pct: n
  * point, whichever is larger, with 8% headroom; never under twice the floor.
  */
 export function chartReach(lines: readonly FlowLine[], keep: ReadonlySet<string>, floorPct: number): number {
-  let kept = 0;
-  const all: number[] = [];
+  const { up, down } = chartReachSides(lines, keep, floorPct);
+  return Math.max(up, down);
+}
+
+/**
+ * Separate up/down reaches so a one-sided tape does not squash the quiet half
+ * (e.g. +1% greens crushed at the top while reds run to −3%).
+ */
+export function chartReachSides(
+  lines: readonly FlowLine[],
+  keep: ReadonlySet<string>,
+  floorPct: number,
+): { up: number; down: number } {
+  let keptUp = 0;
+  let keptDown = 0;
+  const ups: number[] = [];
+  const downs: number[] = [];
   for (const line of lines) {
     const named = keep.has(line.symbol);
     for (const value of line.v) {
-      const abs = Math.abs(value);
-      all.push(abs);
-      if (named && abs > kept) kept = abs;
+      if (value >= 0) {
+        ups.push(value);
+        if (named && value > keptUp) keptUp = value;
+      } else {
+        const abs = -value;
+        downs.push(abs);
+        if (named && abs > keptDown) keptDown = abs;
+      }
     }
   }
-  all.sort((a, b) => a - b);
-  return Math.max(kept, quantile(all, 0.98), floorPct * 2, 0.2) * 1.08;
+  ups.sort((a, b) => a - b);
+  downs.sort((a, b) => a - b);
+  const floor = Math.max(floorPct * 2, 0.2);
+  const side = (kept: number, values: number[]) =>
+    Math.max(kept, values.length ? quantile(values, 0.98) : 0, floor) * 1.08;
+  return { up: side(keptUp, ups), down: side(keptDown, downs) };
 }
 
 /** Change ticks either side of nought: whole 1% for the day, 0.25% for an hour, 0.1% for 15 minutes, widened to keep `minPx` apart. */

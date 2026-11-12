@@ -181,8 +181,11 @@ export class KotakFeedWs {
       }
       this.ws = null;
       this.alive = false;
-      // After a few Matrix auth failures, cool down hard so REST (Order Flow) can finish today's session.
-      const coolDown = this.authFailCount >= 3 ? 15 * 60_000 : 60_000;
+      // Matrix auth flaps burn Kotak HTTPS quota — cool down hard after the first failure.
+      const coolDown = this.authFailCount >= 2 ? 15 * 60_000 : 5 * 60_000;
+      console.warn(
+        `[KotakFeedWs] Matrix auth failed ×${this.authFailCount} — cooling ${Math.round(coolDown / 1000)}s for Order Flow REST`
+      );
       this.scheduleReconnect(coolDown);
       return;
     }

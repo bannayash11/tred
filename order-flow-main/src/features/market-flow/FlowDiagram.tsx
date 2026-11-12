@@ -2,7 +2,7 @@ import { memo, useEffect, useId, useMemo, useRef, type ReactNode } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { fmtPrice } from '@/utils/formatters';
 import { candlesFromCloses, compressedScale, compressedTicks, drawnValues, gateRows, sCurve, sCurveOn } from './diagramModel';
-import { chartReach, chartSpan, endLabel, lineOf, MINUTE, namedLines, pathOf, provisionalLine, timeTicks, type FlowLine } from './flowChartModel';
+import { chartReachSides, chartSpan, endLabel, lineOf, MINUTE, namedLines, pathOf, provisionalLine, timeTicks, type FlowLine } from './flowChartModel';
 import { useFlowFocus, type FocusState } from './flowFocus';
 import { BuildMark, buildUpText, ChangeText, DotMeter, heatStyle, pctText, TickFlash, signedText, Spark, toneOf, windowCandles, shortSector } from './FlowParts';
 import { SymbolMark } from '@/components/common/SymbolMark';
@@ -134,7 +134,8 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
   const { xT0, xT1, gateL, gateR, plotTop, plotBottom, zeroY } = layout;
   const half = (plotBottom - plotTop) / 2;
   // The pills take less of a narrow chart.
-  const pillW = xT1 - xT0 < 460 ? 112 : 132;
+  // Wider pills + room for scrollbar gutter so labels/% don’t clip
+  const pillW = xT1 - xT0 < 460 ? 128 : 148;
   const [t0, t1] = useMemo(() => chartSpan(flow), [flow]);
   const bySymbol = useMemo(() => new Map(flow.stocks.map(stock => [stock.symbol, stock])), [flow.stocks]);
 
@@ -181,9 +182,24 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
   const index = read.has('NIFTY') ? bySymbol.get('NIFTY') ?? null : null;
   const named = useMemo(() => namedLines(flow, settings.named ?? 5, read, index?.symbol ?? null), [flow, settings.named, read, index]);
   const keep = useMemo(() => new Set([...named.up, ...named.down].map(stock => stock.symbol)), [named]);
-  // The reach is read from the drawn (filtered) lines, so one bad print cannot squash the fan.
-  const reach = useMemo(() => chartReach(lines, keep, flow.floorPct) / 1.08 * 1.04, [lines, keep, flow.floorPct]);
-  const yOf = useMemo(() => compressedScale(reach, zeroY, half), [reach, zeroY, half]);
+  // Reach from real futures only (skip provisional guesses — they stretch the axis and crush the quiet half).
+  const reach = useMemo(() => {
+    const real = lines.filter((line) => !line.provisional);
+    const sides = chartReachSides(real.length ? real : lines, keep, flow.floorPct);
+    const tune = (v: number) => (v / 1.08) * 1.04;
+    let up = tune(sides.up);
+    let down = tune(sides.down);
+    // Keep both halves usable: quiet side at least ~45% of the busy side.
+    const floor = Math.max(flow.floorPct * 2, 0.35);
+    up = Math.max(up, floor);
+    down = Math.max(down, floor, up * 0.45);
+    up = Math.max(up, down * 0.45);
+    return { up, down };
+  }, [lines, keep, flow.floorPct]);
+  const yOf = useMemo(
+    () => compressedScale(reach.up, zeroY, half, reach.down),
+    [reach.up, reach.down, zeroY, half],
+  );
   const xOf = useMemo(() => (ms: number) => xT0 + ((Math.max(t0, Math.min(t1, ms)) - t0) / Math.max(1, t1 - t0)) * (xT1 - xT0), [xT0, xT1, t0, t1]);
 
 
@@ -342,7 +358,7 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
   };
 
   // ── Axes ──
-  const yTicks = compressedTicks(reach, half);
+  const yTicks = compressedTicks(reach.up, half, 22, reach.down);
   const xTicks = useMemo(() => timeTicks(t0, t1, xT1 - xT0, flow.window), [t0, t1, xT1, xT0, flow.window]);
   const zeroDividerX = layout.smallX0 - 10;
   const sCurvePath = `M${xT0},${zeroY}H${gateR + 8}${sCurveOn(gateR + 8, zeroY, zeroDividerX, layout.midY, 0.5)}H${W - PAD}`;
@@ -358,7 +374,7 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
         <rect className="mf-dg__spine is-up" x={PAD} y={plotTop} width="4" height={Math.max(0, zeroY - plotTop)} rx="2" />
         <rect className="mf-dg__spine is-down" x={PAD} y={zeroY} width="4" height={Math.max(0, plotBottom - zeroY)} rx="2" />
         <rect className="mf-dg__floor" x={xT0} width={xT1 - xT0} y={yOf(flow.floorPct)} height={yOf(-flow.floorPct) - yOf(flow.floorPct)} />
-        {yTicks.flatMap(v => [v, -v]).map(v => (
+        {yTicks.map(v => (
           <g key={v}>
             <line className="mf-dg__grid" x1={xT0} x2={xT1} y1={yOf(v)} y2={yOf(v)} />
             <text className="mf-dg__tick" x={xT0 - 8} y={yOf(v) + 4} textAnchor="end">{v > 0 ? '+' : '−'}{Math.abs(v)}%</text>
@@ -375,18 +391,27 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
       {/* The fan, the curves and the medians on a layer of their own: dimming them on hover is a composited fade, not a repaint. */}
       <svg className="mf-dg__under mf-dg__fan" width={W} height={H} aria-hidden="true">
         <g>
-          <SectorLines sectors={flow.sectors} yOf={yOf} x0={xT0 + pillW + 8} x1={xT1} />
+          <defs>
+            <linearGradient id={`${pathId}-sweep-up`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--flow-up-ink, #3dfcb0)" stopOpacity="0" />
+              <stop offset="50%" stopColor="var(--flow-up-ink, #3dfcb0)" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="var(--flow-up-ink, #3dfcb0)" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id={`${pathId}-sweep-down`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--flow-down-ink, #ff6685)" stopOpacity="0" />
+              <stop offset="50%" stopColor="var(--flow-down-ink, #ff6685)" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="var(--flow-down-ink, #ff6685)" stopOpacity="0" />
+            </linearGradient>
+            {funnel && (
+              <linearGradient id={`${pathId}-funnel`} x1={xT1 - 40} x2={gateR} y1="0" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0" className="mf-dg__funnel-stop is-from" />
+                <stop offset="1" className="mf-dg__funnel-stop is-to" />
+              </linearGradient>
+            )}
+          </defs>
+          <SectorLines sectors={flow.sectors} yOf={yOf} x0={xT0 + pillW + 18} x1={xT1} />
           {funnel && (
-            <>
-              {/* The funnel fades in from the chart, so the flat names pour into it rather than hit a grey slab. */}
-              <defs>
-                <linearGradient id={`${pathId}-funnel`} x1={xT1 - 40} x2={gateR} y1="0" y2="0" gradientUnits="userSpaceOnUse">
-                  <stop offset="0" className="mf-dg__funnel-stop is-from" />
-                  <stop offset="1" className="mf-dg__funnel-stop is-to" />
-                </linearGradient>
-              </defs>
-              <path className="mf-dg__funnel" d={funnel} fill={`url(#${pathId}-funnel)`} style={{ fill: `url(#${pathId}-funnel)` }} />
-            </>
+            <path className="mf-dg__funnel" d={funnel} fill={`url(#${pathId}-funnel)`} style={{ fill: `url(#${pathId}-funnel)` }} />
           )}
           <path className="mf-dg__faint is-flat" d={fan.flat} />
           <path className="mf-dg__faint is-down" d={fan.down} />
@@ -405,20 +430,33 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
       {/* What moves lives in its own layer, so a frame repaints the light, not the thousands of lines under it. */}
       {!calm && (
         <svg className="mf-dg__under mf-dg__motion" width={W} height={H} aria-hidden="true">
-          <path className="mf-dg__stream is-up" d={streams.up} />
-          <path className="mf-dg__stream is-down" d={streams.down} />
+          {/* Dual-phase particle streams: soft radiant glow trail + crisp luminous core */}
+          <path className="mf-dg__stream is-glow is-up" d={streams.up} />
+          <path className="mf-dg__stream is-core is-up" d={streams.up} />
+          <path className="mf-dg__stream is-glow is-down" d={streams.down} />
+          <path className="mf-dg__stream is-core is-down" d={streams.down} />
           {/* A comet runs each lead path, from the open to its tile, at its own pace. */}
-          {[...named.down, ...named.up].map((stock, i) => (
-            <circle key={stock.symbol} className={`mf-dg__comet is-${tone(stock)}`} r="2.4">
-              <animateMotion dur={`${7 + (i % 4) * 1.3}s`} begin={`${-((i * 1.7) % 7).toFixed(1)}s`} repeatCount="indefinite" calcMode="linear">
-                <mpath href={`#${pathId}-${i}`} />
-              </animateMotion>
-            </circle>
-          ))}
+          {[...named.down, ...named.up].map((stock, i) => {
+            const t = tone(stock);
+            return (
+              <g key={stock.symbol} className="mf-dg__comet-wrap">
+                <circle className={`mf-dg__comet-halo is-${t}`} r="5.2">
+                  <animateMotion dur={`${6.8 + (i % 4) * 1.2}s`} begin={`${-((i * 1.7) % 7).toFixed(1)}s`} repeatCount="indefinite" calcMode="linear">
+                    <mpath href={`#${pathId}-${i}`} />
+                  </animateMotion>
+                </circle>
+                <circle className={`mf-dg__comet is-${t}`} r="2.5">
+                  <animateMotion dur={`${6.8 + (i % 4) * 1.2}s`} begin={`${-((i * 1.7) % 7).toFixed(1)}s`} repeatCount="indefinite" calcMode="linear">
+                    <mpath href={`#${pathId}-${i}`} />
+                  </animateMotion>
+                </circle>
+              </g>
+            );
+          })}
         </svg>
       )}
       <svg className="mf-dg__under mf-dg__frame" width={W} height={H} aria-hidden="true">
-        <GateFrame x0={gateL} x1={gateR} top={plotTop} upEnd={gate.upEnd} downStart={gate.downStart} bottom={plotBottom} />
+        <GateFrame x0={gateL} x1={gateR} top={plotTop} upEnd={gate.upEnd} downStart={gate.downStart} bottom={plotBottom} pathId={pathId} />
         <g className="mf-dg__dots">
           {sides.flatMap(({ shownList, featured }) => [...shownList, ...featured]).map(stock => {
             const row = gate.rows.get(stock.symbol);
@@ -433,12 +471,22 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
         {[...named.down, ...named.up].map(stock => {
           const item = lines.find(l => l.symbol === stock.symbol);
           if (!item) return null;
-          return <circle key={stock.symbol} className={`mf-dg__live is-${tone(stock)}`} cx={xOf(item.t[item.t.length - 1])} cy={yOf(item.v[item.v.length - 1])} r="2.6" />;
+          const cx = xOf(item.t[item.t.length - 1]);
+          const cy = yOf(item.v[item.v.length - 1]);
+          const t = tone(stock);
+          return (
+            <g key={stock.symbol} className="mf-dg__live-group">
+              <circle className={`mf-dg__live-pulse is-${t}`} cx={cx} cy={cy} r="6.5" />
+              <circle className={`mf-dg__live is-${t}`} cx={cx} cy={cy} r="2.6" />
+            </g>
+          );
         })}
         {/* The origin: every path starts here, so it carries a halo and a slow ring. */}
         <g className="mf-dg__origin" transform={`translate(${xT0},${zeroY})`}>
-          <circle className="is-halo" r="11" />
-          <circle className="is-ring" r="15" />
+          <circle className="is-halo" r="14" />
+          <circle className="is-pulse" r="8" />
+          <circle className="is-ring" r="17" />
+          <circle className="is-core" r="3.5" />
         </g>
         <circle className="mf-dg__node" cx={xT0} cy={zeroY} r="3.5" />
         <circle className="mf-dg__node" cx={gateR + 8} cy={zeroY} r="3.5" />
@@ -483,75 +531,139 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
           <rect className="mf-chart__vtag" height="20" rx="4" />
           <text className="mf-chart__vtext" />
         </g>
-        <rect className="mf-chart__hit" x={xT0 + pillW + 8} y={plotTop} width={Math.max(0, xT1 - xT0 - pillW - 8)} height={plotBottom - plotTop}
+        <rect className="mf-chart__hit" x={xT0 + pillW + 18} y={plotTop} width={Math.max(0, xT1 - xT0 - pillW - 18)} height={plotBottom - plotTop}
           onPointerMove={move} onPointerLeave={leave} onClick={() => (snapRef.current ? focus.togglePin(snapRef.current, 'chart') : focus.clear())} />
       </svg>
     </>
   );
 }
 
-function GateFrame({ x0, x1, top, upEnd, downStart, bottom }: { x0: number; x1: number; top: number; upEnd: number; downStart: number; bottom: number }) {
-  const bracket = (y0: number, y1: number, cls: string) => {
+function GateFrame({ x0, x1, top, upEnd, downStart, bottom, pathId }: { x0: number; x1: number; top: number; upEnd: number; downStart: number; bottom: number; pathId: string }) {
+  const bracket = (y0: number, y1: number, cls: string, sweepId: string) => {
     if (y1 - y0 < 4) return null;
     const k = 7;
+    const gw = x1 - x0;
+    const gh = y1 - y0;
     return (
       <g className={`mf-dg__gate ${cls}`}>
-        <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} />
-        {/* A light that sweeps through the tunnel, the way the market moves through it. */}
-        <rect className="mf-dg__sweep" x={x0} y={y0} width={Math.min(18, (x1 - x0) / 3)} height={y1 - y0} style={{ '--gw': `${x1 - x0}px` } as React.CSSProperties} />
-        <path d={`M${x0 + k},${y0}H${x0}V${y1}H${x0 + k}M${x1 - k},${y0}H${x1}V${y1}H${x1 - k}`} />
+        <rect className="mf-dg__gate-bg" x={x0} y={y0} width={gw} height={gh} rx="3" />
+        <line className="mf-dg__gate-guide" x1={x0} x2={x1} y1={y0 + gh / 2} y2={y0 + gh / 2} />
+        {/* Laser sweep scanner beam */}
+        <rect className="mf-dg__sweep" x={x0} y={y0} width={Math.min(22, gw / 2.6)} height={gh} fill={`url(#${sweepId})`} style={{ '--gw': `${gw}px` } as React.CSSProperties} />
+        <path className="mf-dg__gate-corner" d={`M${x0 + k},${y0}H${x0}V${y1}H${x0 + k}M${x1 - k},${y0}H${x1}V${y1}H${x1 - k}`} />
       </g>
     );
   };
-  return <>{bracket(top, upEnd, 'is-up')}{bracket(downStart, bottom, 'is-down')}</>;
+  return (
+    <>
+      {bracket(top, upEnd, 'is-up', `${pathId}-sweep-up`)}
+      {bracket(downStart, bottom, 'is-down', `${pathId}-sweep-down`)}
+    </>
+  );
 }
 
 const SectorLines = memo(function SectorLines({ sectors, yOf, x0, x1 }: { sectors: readonly FlowSector[]; yOf: (pct: number) => number; x0: number; x1: number }) {
   return <g className="mf-dg__medians">{sectors.filter(s => s.changePct != null).map(s => <line key={s.id} data-sector={s.id} x1={x0} x2={x1} y1={yOf(s.changePct ?? 0)} y2={yOf(s.changePct ?? 0)} />)}</g>;
 });
 
-/** The sector pills over the chart's left side: up sectors from the top, down sectors from the bottom, leader to laggard. */
-const SectorPills = memo(function SectorPills({ sectors, top, bottom, zeroY, x, pillW }: { sectors: readonly FlowSector[]; yOf: (pct: number) => number; top: number; bottom: number; zeroY: number; x: number; pillW: number }) {
+/**
+ * Sector pills in two scrollable halves: greens from the top, reds from the
+ * bottom. Fixed row height + scrollbar so the full list stays readable.
+ */
+const SectorPills = memo(function SectorPills({
+  sectors,
+  top,
+  bottom,
+  zeroY,
+  x,
+  pillW,
+}: {
+  sectors: readonly FlowSector[];
+  yOf: (pct: number) => number;
+  top: number;
+  bottom: number;
+  zeroY: number;
+  x: number;
+  pillW: number;
+}) {
   const focus = useFlowFocus();
-  const measured = sectors.filter(s => s.changePct != null);
-  const up = measured.filter(s => (s.changePct ?? 0) >= 0);
-  const down = measured.filter(s => (s.changePct ?? 0) < 0);
-  // One pitch for all: the up pills stack from the top, the down pills from the bottom, and they meet wherever the count puts them.
-  const pitch = Math.min(27, (bottom - top) / Math.max(1, measured.length));
-  const pitchUp = pitch;
-  const pitchDown = pitch;
-  void zeroY;
-  const pill = (sector: FlowSector, y: number, h: number, slot: number) => {
+  const measured = sectors.filter((s) => s.changePct != null);
+  const up = measured
+    .filter((s) => (s.changePct ?? 0) >= 0)
+    .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
+  const down = measured
+    .filter((s) => (s.changePct ?? 0) < 0)
+    .sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
+  const gap = 6;
+  const upH = Math.max(48, zeroY - gap - top);
+  const downH = Math.max(48, bottom - (zeroY + gap));
+
+  const pill = (sector: FlowSector, slot: number) => {
     const total = Math.max(1, sector.count);
     const pct = sector.changePct ?? 0;
     return (
-      <li key={slot} style={{ top: y, height: h, '--i': slot } as React.CSSProperties}>
-        <button type="button" className={`mf-pill ${pct > 0.0049 ? 'is-up' : pct < -0.0049 ? 'is-down' : 'is-flat'}`} data-sector={sector.id} style={heatStyle(sector.changePct, 3)}
+      <li key={sector.id} style={{ '--i': slot } as React.CSSProperties}>
+        <button
+          type="button"
+          className={`mf-pill ${pct > 0.0049 ? 'is-up' : pct < -0.0049 ? 'is-down' : 'is-flat'}`}
+          data-sector={sector.id}
+          style={heatStyle(sector.changePct, 3)}
           aria-label={`${sector.label}: median ${pctText(sector.changePct)}; ${sector.bullish} up, ${sector.bearish} down, ${sector.rangebound} flat of ${sector.count}`}
-          onPointerEnter={event => { if (event.pointerType !== 'touch') focus.hoverSector(sector.id); }}
-          onPointerLeave={event => { if (event.pointerType !== 'touch') focus.hoverSector(null); }}
-          onFocus={() => focus.hoverSector(sector.id)} onBlur={() => focus.hoverSector(null)}
-          onClick={() => focus.togglePinSector(sector.id)}>
-          <span className="mf-pill__row"><span className="mf-pill__name" data-ui-tip={sector.label} data-ui-tip-when={shortSector(sector.label) === sector.label ? 'cut' : undefined}>{shortSector(sector.label)}</span><span className="mf-pill__pct">{pctText(sector.changePct)}</span></span>
-          {h >= 22 && (
-            <span className="mf-pill__bar" aria-hidden="true">
-              {Array.from({ length: Math.min(total, 14) }, (_, i) => {
-                const share = (i + 0.5) / Math.min(total, 14);
-                const cls = share <= sector.bullish / total ? 'is-up' : share >= 1 - sector.bearish / total ? 'is-down' : 'is-flat';
-                return <i key={i} className={cls} />;
-              })}
+          onPointerEnter={(event) => {
+            if (event.pointerType !== 'touch') focus.hoverSector(sector.id);
+          }}
+          onPointerLeave={(event) => {
+            if (event.pointerType !== 'touch') focus.hoverSector(null);
+          }}
+          onFocus={() => focus.hoverSector(sector.id)}
+          onBlur={() => focus.hoverSector(null)}
+          onClick={() => focus.togglePinSector(sector.id)}
+        >
+          <span className="mf-pill__row">
+            <span
+              className="mf-pill__name"
+              data-ui-tip={sector.label}
+              data-ui-tip-when={shortSector(sector.label) === sector.label ? 'cut' : undefined}
+            >
+              {shortSector(sector.label)}
             </span>
-          )}
+            <span className="mf-pill__pct">{pctText(sector.changePct)}</span>
+          </span>
+          <span className="mf-pill__bar" aria-hidden="true">
+            {Array.from({ length: Math.min(total, 14) }, (_, i) => {
+              const share = (i + 0.5) / Math.min(total, 14);
+              const cls =
+                share <= sector.bullish / total
+                  ? 'is-up'
+                  : share >= 1 - sector.bearish / total
+                    ? 'is-down'
+                    : 'is-flat';
+              return <i key={i} className={cls} />;
+            })}
+          </span>
         </button>
       </li>
     );
   };
+
   return (
-    <nav className="mf-pills" aria-label="Sectors, leader to laggard" style={{ left: x, ['--pill-w' as string]: `${pillW}px` }}>
-      <ul>
-        {up.map((s, i) => pill(s, top + i * pitchUp, pitchUp - 3, i))}
-        {down.map((s, i) => pill(s, bottom - (down.length - i) * pitchDown, pitchDown - 3, up.length + i))}
-      </ul>
+    <nav
+      className="mf-pills is-scroll"
+      aria-label="Sectors, leader to laggard"
+      style={{
+        left: x,
+        top,
+        height: bottom - top,
+        ['--pill-w' as string]: `${pillW}px`,
+        ['--zero-y' as string]: `${zeroY - top}px`,
+      }}
+    >
+      <div className="mf-pills__half is-up" style={{ height: upH }}>
+        <ul>{up.map((s, i) => pill(s, i))}</ul>
+      </div>
+      <div className="mf-pills__half is-down" style={{ height: downH, marginTop: gap * 2 }}>
+        <ul>{down.map((s, i) => pill(s, up.length + i))}</ul>
+      </div>
     </nav>
   );
 });
@@ -843,6 +955,7 @@ export function CandleChart({ stock, width, height, levels = true }: { stock: Fl
           </g>
         );
       })}
+      <circle className="mf-candles__last-pulse" cx={x(candles.length - 1)} cy={y(candles[candles.length - 1].close)} r="5.5" />
       <circle className="mf-candles__last" cx={x(candles.length - 1)} cy={y(candles[candles.length - 1].close)} r="2.5" />
     </svg>
   );

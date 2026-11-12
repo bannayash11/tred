@@ -391,18 +391,27 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
       {/* The fan, the curves and the medians on a layer of their own: dimming them on hover is a composited fade, not a repaint. */}
       <svg className="mf-dg__under mf-dg__fan" width={W} height={H} aria-hidden="true">
         <g>
+          <defs>
+            <linearGradient id={`${pathId}-sweep-up`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--flow-up-ink, #3dfcb0)" stopOpacity="0" />
+              <stop offset="50%" stopColor="var(--flow-up-ink, #3dfcb0)" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="var(--flow-up-ink, #3dfcb0)" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id={`${pathId}-sweep-down`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--flow-down-ink, #ff6685)" stopOpacity="0" />
+              <stop offset="50%" stopColor="var(--flow-down-ink, #ff6685)" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="var(--flow-down-ink, #ff6685)" stopOpacity="0" />
+            </linearGradient>
+            {funnel && (
+              <linearGradient id={`${pathId}-funnel`} x1={xT1 - 40} x2={gateR} y1="0" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0" className="mf-dg__funnel-stop is-from" />
+                <stop offset="1" className="mf-dg__funnel-stop is-to" />
+              </linearGradient>
+            )}
+          </defs>
           <SectorLines sectors={flow.sectors} yOf={yOf} x0={xT0 + pillW + 18} x1={xT1} />
           {funnel && (
-            <>
-              {/* The funnel fades in from the chart, so the flat names pour into it rather than hit a grey slab. */}
-              <defs>
-                <linearGradient id={`${pathId}-funnel`} x1={xT1 - 40} x2={gateR} y1="0" y2="0" gradientUnits="userSpaceOnUse">
-                  <stop offset="0" className="mf-dg__funnel-stop is-from" />
-                  <stop offset="1" className="mf-dg__funnel-stop is-to" />
-                </linearGradient>
-              </defs>
-              <path className="mf-dg__funnel" d={funnel} fill={`url(#${pathId}-funnel)`} style={{ fill: `url(#${pathId}-funnel)` }} />
-            </>
+            <path className="mf-dg__funnel" d={funnel} fill={`url(#${pathId}-funnel)`} style={{ fill: `url(#${pathId}-funnel)` }} />
           )}
           <path className="mf-dg__faint is-flat" d={fan.flat} />
           <path className="mf-dg__faint is-down" d={fan.down} />
@@ -421,20 +430,33 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
       {/* What moves lives in its own layer, so a frame repaints the light, not the thousands of lines under it. */}
       {!calm && (
         <svg className="mf-dg__under mf-dg__motion" width={W} height={H} aria-hidden="true">
-          <path className="mf-dg__stream is-up" d={streams.up} />
-          <path className="mf-dg__stream is-down" d={streams.down} />
+          {/* Dual-phase particle streams: soft radiant glow trail + crisp luminous core */}
+          <path className="mf-dg__stream is-glow is-up" d={streams.up} />
+          <path className="mf-dg__stream is-core is-up" d={streams.up} />
+          <path className="mf-dg__stream is-glow is-down" d={streams.down} />
+          <path className="mf-dg__stream is-core is-down" d={streams.down} />
           {/* A comet runs each lead path, from the open to its tile, at its own pace. */}
-          {[...named.down, ...named.up].map((stock, i) => (
-            <circle key={stock.symbol} className={`mf-dg__comet is-${tone(stock)}`} r="2.4">
-              <animateMotion dur={`${7 + (i % 4) * 1.3}s`} begin={`${-((i * 1.7) % 7).toFixed(1)}s`} repeatCount="indefinite" calcMode="linear">
-                <mpath href={`#${pathId}-${i}`} />
-              </animateMotion>
-            </circle>
-          ))}
+          {[...named.down, ...named.up].map((stock, i) => {
+            const t = tone(stock);
+            return (
+              <g key={stock.symbol} className="mf-dg__comet-wrap">
+                <circle className={`mf-dg__comet-halo is-${t}`} r="5.2">
+                  <animateMotion dur={`${6.8 + (i % 4) * 1.2}s`} begin={`${-((i * 1.7) % 7).toFixed(1)}s`} repeatCount="indefinite" calcMode="linear">
+                    <mpath href={`#${pathId}-${i}`} />
+                  </animateMotion>
+                </circle>
+                <circle className={`mf-dg__comet is-${t}`} r="2.5">
+                  <animateMotion dur={`${6.8 + (i % 4) * 1.2}s`} begin={`${-((i * 1.7) % 7).toFixed(1)}s`} repeatCount="indefinite" calcMode="linear">
+                    <mpath href={`#${pathId}-${i}`} />
+                  </animateMotion>
+                </circle>
+              </g>
+            );
+          })}
         </svg>
       )}
       <svg className="mf-dg__under mf-dg__frame" width={W} height={H} aria-hidden="true">
-        <GateFrame x0={gateL} x1={gateR} top={plotTop} upEnd={gate.upEnd} downStart={gate.downStart} bottom={plotBottom} />
+        <GateFrame x0={gateL} x1={gateR} top={plotTop} upEnd={gate.upEnd} downStart={gate.downStart} bottom={plotBottom} pathId={pathId} />
         <g className="mf-dg__dots">
           {sides.flatMap(({ shownList, featured }) => [...shownList, ...featured]).map(stock => {
             const row = gate.rows.get(stock.symbol);
@@ -449,12 +471,22 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
         {[...named.down, ...named.up].map(stock => {
           const item = lines.find(l => l.symbol === stock.symbol);
           if (!item) return null;
-          return <circle key={stock.symbol} className={`mf-dg__live is-${tone(stock)}`} cx={xOf(item.t[item.t.length - 1])} cy={yOf(item.v[item.v.length - 1])} r="2.6" />;
+          const cx = xOf(item.t[item.t.length - 1]);
+          const cy = yOf(item.v[item.v.length - 1]);
+          const t = tone(stock);
+          return (
+            <g key={stock.symbol} className="mf-dg__live-group">
+              <circle className={`mf-dg__live-pulse is-${t}`} cx={cx} cy={cy} r="6.5" />
+              <circle className={`mf-dg__live is-${t}`} cx={cx} cy={cy} r="2.6" />
+            </g>
+          );
         })}
         {/* The origin: every path starts here, so it carries a halo and a slow ring. */}
         <g className="mf-dg__origin" transform={`translate(${xT0},${zeroY})`}>
-          <circle className="is-halo" r="11" />
-          <circle className="is-ring" r="15" />
+          <circle className="is-halo" r="14" />
+          <circle className="is-pulse" r="8" />
+          <circle className="is-ring" r="17" />
+          <circle className="is-core" r="3.5" />
         </g>
         <circle className="mf-dg__node" cx={xT0} cy={zeroY} r="3.5" />
         <circle className="mf-dg__node" cx={gateR + 8} cy={zeroY} r="3.5" />
@@ -506,20 +538,28 @@ function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: n
   );
 }
 
-function GateFrame({ x0, x1, top, upEnd, downStart, bottom }: { x0: number; x1: number; top: number; upEnd: number; downStart: number; bottom: number }) {
-  const bracket = (y0: number, y1: number, cls: string) => {
+function GateFrame({ x0, x1, top, upEnd, downStart, bottom, pathId }: { x0: number; x1: number; top: number; upEnd: number; downStart: number; bottom: number; pathId: string }) {
+  const bracket = (y0: number, y1: number, cls: string, sweepId: string) => {
     if (y1 - y0 < 4) return null;
     const k = 7;
+    const gw = x1 - x0;
+    const gh = y1 - y0;
     return (
       <g className={`mf-dg__gate ${cls}`}>
-        <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} />
-        {/* A light that sweeps through the tunnel, the way the market moves through it. */}
-        <rect className="mf-dg__sweep" x={x0} y={y0} width={Math.min(18, (x1 - x0) / 3)} height={y1 - y0} style={{ '--gw': `${x1 - x0}px` } as React.CSSProperties} />
-        <path d={`M${x0 + k},${y0}H${x0}V${y1}H${x0 + k}M${x1 - k},${y0}H${x1}V${y1}H${x1 - k}`} />
+        <rect className="mf-dg__gate-bg" x={x0} y={y0} width={gw} height={gh} rx="3" />
+        <line className="mf-dg__gate-guide" x1={x0} x2={x1} y1={y0 + gh / 2} y2={y0 + gh / 2} />
+        {/* Laser sweep scanner beam */}
+        <rect className="mf-dg__sweep" x={x0} y={y0} width={Math.min(22, gw / 2.6)} height={gh} fill={`url(#${sweepId})`} style={{ '--gw': `${gw}px` } as React.CSSProperties} />
+        <path className="mf-dg__gate-corner" d={`M${x0 + k},${y0}H${x0}V${y1}H${x0 + k}M${x1 - k},${y0}H${x1}V${y1}H${x1 - k}`} />
       </g>
     );
   };
-  return <>{bracket(top, upEnd, 'is-up')}{bracket(downStart, bottom, 'is-down')}</>;
+  return (
+    <>
+      {bracket(top, upEnd, 'is-up', `${pathId}-sweep-up`)}
+      {bracket(downStart, bottom, 'is-down', `${pathId}-sweep-down`)}
+    </>
+  );
 }
 
 const SectorLines = memo(function SectorLines({ sectors, yOf, x0, x1 }: { sectors: readonly FlowSector[]; yOf: (pct: number) => number; x0: number; x1: number }) {
@@ -915,6 +955,7 @@ export function CandleChart({ stock, width, height, levels = true }: { stock: Fl
           </g>
         );
       })}
+      <circle className="mf-candles__last-pulse" cx={x(candles.length - 1)} cy={y(candles[candles.length - 1].close)} r="5.5" />
       <circle className="mf-candles__last" cx={x(candles.length - 1)} cy={y(candles[candles.length - 1].close)} r="2.5" />
     </svg>
   );

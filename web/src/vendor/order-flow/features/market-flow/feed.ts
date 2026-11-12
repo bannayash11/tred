@@ -110,7 +110,13 @@ export function useMarketFeed() {
       .then((next) => {
         if (!next) return;
         setError(null);
-        if (next.date < (statusRef.current?.session ?? getLatestTradingSessionDate(new Date()))) return;
+        const session = statusRef.current?.session ?? getLatestTradingSessionDate(new Date());
+        // Keep an older session on screen while today's file is still building
+        // (otherwise the board stays empty on "Loading the market…").
+        if (next.date < session) {
+          setMarket((current) => current ?? next);
+          return;
+        }
         setMarket((current) => (current && next.at <= current.at ? current : next));
       })
       .catch((err) => {
@@ -123,14 +129,15 @@ export function useMarketFeed() {
     const timer = window.setInterval(() => {
       if (!visible()) return;
       if (!market || moving(statusRef.current)) setTick((value) => value + 1);
-    }, market ? 60_000 : 5_000);
+    }, market ? 60_000 : 2_000);
     return () => window.clearInterval(timer);
   }, [market]);
 
   return { market, loading: !market, error, status, rescan: () => setTick((value) => value + 1) };
 }
 
-const WORKERS_LIVE = 6;
+/** Keep live concurrency low — Kotak 429s when board + build + quotes compete. */
+const WORKERS_LIVE = 3;
 const WORKERS_AFTER = 2;
 
 /** Each underlying's futures: read six at a time, and again every minute or two while the numbers move. (same as order-flow-main) */
@@ -152,13 +159,18 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const every = statusRef.current?.provider.alwaysLive ? 60_000 : 90_000;
+    const incomplete = loaded < symbols.length;
+    // Retry empty futures quickly while the board is still filling; ease off once warm.
+    const every = incomplete
+      ? 8_000
+      : statusRef.current?.provider.alwaysLive
+        ? 60_000
+        : 90_000;
     const timer = window.setInterval(() => {
       if (!visible()) return;
       // Keep catch-up after market close until every underlying has futures
       // (today's session candles are still available; otherwise the board stays sparse).
-      const incomplete = loaded < symbols.length;
-      if (moving(statusRef.current) || incomplete) setTick((value) => value + 1);
+      if (moving(statusRef.current) || loaded < symbols.length) setTick((value) => value + 1);
     }, every);
     return () => window.clearInterval(timer);
   }, [enabled, status, loaded, symbols.length]);
