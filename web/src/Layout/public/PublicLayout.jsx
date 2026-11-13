@@ -52,6 +52,54 @@ export default function PublicLayout() {
   }, [authUser]);
 
   useEffect(() => {
+    // Public (no login): plans + announcement only — never pull live quotes on server keys
+    fetchPublicAnnouncement()
+      .then((res) => {
+        if (res.success && res.enabled) {
+          setAnnouncement(res.announcement);
+        }
+      })
+      .catch((err) => console.error('Announcement fetch error:', err));
+
+    fetchPublicPlans()
+      .then((res) => {
+        if (res.success && res.plans) {
+          dispatch(setPlans(res.plans));
+          setApiBanner('');
+        }
+      })
+      .catch((err) => {
+        console.error('Plans fetch error:', err);
+        setApiBanner(err.userMessage || 'Cannot load membership plans right now.');
+      });
+
+    // Logged-out: clear any leftover market feed from a previous session
+    if (!authToken) {
+      setScreenerDataState({ allStocks: [], bullishSetups: [], bearishSetups: [] });
+      setXrayDataState(null);
+      setNiftyData(null);
+      setBankNiftyData(null);
+      setLiveUpdatedSymbols(new Set());
+      return undefined;
+    }
+
+    getMe()
+      .then((res) => {
+        if (res.success) {
+          setUser(res.user);
+          dispatch(updateUser(res.user));
+          dispatch(loginSuccess({ user: res.user, token: authToken }));
+        }
+      })
+      .catch((err) => {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          dispatch(logout());
+          setUser(null);
+          setApiBanner(err.userMessage || 'Session expired. Please sign in again.');
+        }
+      });
+
     fetchScreener()
       .then((res) => {
         if (res.success) {
@@ -81,46 +129,6 @@ export default function PublicLayout() {
         console.error('X-Ray fetch error:', err);
         setApiBanner(err.userMessage || 'Cannot load Market X-Ray right now.');
       });
-
-    fetchPublicAnnouncement()
-      .then((res) => {
-        if (res.success && res.enabled) {
-          setAnnouncement(res.announcement);
-        }
-      })
-      .catch((err) => console.error('Announcement fetch error:', err));
-
-    fetchPublicPlans()
-      .then((res) => {
-        if (res.success && res.plans) {
-          dispatch(setPlans(res.plans));
-          setApiBanner('');
-        }
-      })
-      .catch((err) => {
-        console.error('Plans fetch error:', err);
-        setApiBanner(err.userMessage || 'Cannot load membership plans right now.');
-      });
-
-    if (authToken) {
-      getMe()
-        .then((res) => {
-          if (res.success) {
-            setUser(res.user);
-            dispatch(updateUser(res.user));
-            dispatch(loginSuccess({ user: res.user, token: authToken }));
-          }
-        })
-        .catch((err) => {
-          // Only wipe session on real auth failure — not deploy/network blips
-          const status = err?.response?.status;
-          if (status === 401 || status === 403) {
-            dispatch(logout());
-            setUser(null);
-            setApiBanner(err.userMessage || 'Session expired. Please sign in again.');
-          }
-        });
-    }
 
     const socket = getSocket();
 
@@ -242,14 +250,31 @@ export default function PublicLayout() {
         </div>
       )}
 
-      {!isOrderFlow && (
-        <MarketTickerBar
-          niftyData={niftyData}
-          bankNiftyData={bankNiftyData}
-          stocks={screenerDataState?.allStocks}
-          onSelectStock={openStockChart}
-        />
-      )}
+      {!isOrderFlow &&
+        (isAuthenticated ? (
+          <MarketTickerBar
+            niftyData={niftyData}
+            bankNiftyData={bankNiftyData}
+            stocks={screenerDataState?.allStocks}
+            onSelectStock={openStockChart}
+          />
+        ) : (
+          <div className="w-full bg-[#070b16] border-b border-slate-800/80 flex items-center justify-between gap-3 h-9 sm:h-10 z-30 px-4 text-[11px]">
+            <span className="font-mono font-bold tracking-wider text-slate-400 uppercase">
+              Live <span className="text-cyan-500/80">Ticker</span>
+              <span className="ml-2 font-sans font-semibold normal-case text-slate-500">
+                — sign in for live quotes
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={goToLogin}
+              className="shrink-0 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300 hover:bg-cyan-500/20"
+            >
+              Sign In
+            </button>
+          </div>
+        ))}
 
       {!isOrderFlow && (
         <Header

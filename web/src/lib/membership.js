@@ -32,6 +32,17 @@ export function isSubscriptionExpired(subscription) {
   return exp.getTime() < Date.now();
 }
 
+/** Paid BYOK member who has not connected demat/broker API keys yet. */
+export function needsByokBrokerConnect(user) {
+  if (!user) return false;
+  const sub = user.subscription;
+  if (!sub || isSubscriptionExpired(sub)) return false;
+  const isByokMember = sub.mode === 'byok' || !!sub.byokGranted;
+  if (!isByokMember) return false;
+  const status = String(user.byok?.status || 'none').toLowerCase();
+  return status !== 'connected';
+}
+
 export function planToMembership(plan) {
   if (!plan) return null;
   const tfs = plan.timeframesAllowed

@@ -25,7 +25,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { updateUser } from '../store/slices/authSlice';
 import { setPlans } from '../store/slices/contentSlice';
-import { fetchPublicPlans } from '../services/api';
+import { fetchPublicPlans, updateByokCredentialsApi } from '../services/api';
 import { toErrorText } from '../lib/apiError';
 import RazorpayCheckout from '../components/RazorpayCheckout';
 import {
@@ -34,6 +34,7 @@ import {
   validateByokForm,
   buildByokPayload,
 } from '../lib/byokBrokers';
+import { needsByokBrokerConnect } from '../lib/membership';
 
 function emptyByokValues(brokerId) {
   const broker = getByokBroker(brokerId);
@@ -76,27 +77,32 @@ export default function MembershipCheckout() {
   const navigate = useNavigate();
   const { isDark } = useTheme();
   const [searchParams] = useSearchParams();
-  const planId = searchParams.get('planId') || '';
+  const planIdParam = searchParams.get('planId') || '';
+  const forceConnectBroker = searchParams.get('connectBroker') === '1';
   const payRef = useRef(null);
 
   const isAuthenticated = useSelector((state) => state.auth.isAuthenticated);
   const authUser = useSelector((state) => state.auth.user);
   const plansFromStore = useSelector((state) => state.content?.plans || []);
 
+  const planId = planIdParam || authUser?.subscription?.planId || '';
+  const mustConnectBroker = forceConnectBroker || needsByokBrokerConnect(authUser);
+
   const [plans, setLocalPlans] = useState(plansFromStore);
   const [loading, setLoading] = useState(!plansFromStore.length);
   const [loadError, setLoadError] = useState('');
   const [name, setName] = useState(authUser?.name || '');
   const [email, setEmail] = useState(authUser?.email || '');
-  const [phone, setPhone] = useState(authUser?.phone || '');
   const [formError, setFormError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [readyToPay, setReadyToPay] = useState(false);
+  /** After BYOK payment: collect demat/broker API keys */
+  const [awaitingByok, setAwaitingByok] = useState(() => mustConnectBroker);
   const [byokProvider, setByokProvider] = useState('upstox');
   const [byokValues, setByokValues] = useState(() => emptyByokValues('upstox'));
-  const [byokCredentials, setByokCredentials] = useState(null);
   const [showByokHelp, setShowByokHelp] = useState(false);
   const [showSecrets, setShowSecrets] = useState({});
+  const [byokSubmitting, setByokSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
@@ -109,9 +115,15 @@ export default function MembershipCheckout() {
     if (authUser) {
       setName(authUser.name || '');
       setEmail(authUser.email || '');
-      setPhone(authUser.phone || '');
     }
   }, [authUser]);
+
+  useEffect(() => {
+    if (mustConnectBroker) {
+      setAwaitingByok(true);
+      setReadyToPay(false);
+    }
+  }, [mustConnectBroker]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +163,10 @@ export default function MembershipCheckout() {
     [plans, planId]
   );
 
-  const isByok = plan?.mode === 'byok';
+  const isByok =
+    plan?.mode === 'byok' ||
+    authUser?.subscription?.mode === 'byok' ||
+    !!authUser?.subscription?.byokGranted;
   const broker = useMemo(() => getByokBroker(byokProvider), [byokProvider]);
   const months = plan ? plan.durationMonths || Math.round((plan.durationDays || 30) / 30) : 0;
 
@@ -163,13 +178,40 @@ export default function MembershipCheckout() {
   const customerDetails = useMemo(
     () => ({
       name: String(name || '').trim(),
-      email: String(email || '').trim().toLowerCase(),
-      phone: String(phone || '').trim()
+      email: String(email || authUser?.email || '').trim().toLowerCase(),
+      phone: String(authUser?.phone || '').trim()
     }),
-    [name, email, phone]
+    [name, email, authUser?.email, authUser?.phone]
   );
 
-  const markDirty = () => setReadyToPay(false);
+  const detailsErrors = useMemo(() => {
+    const errors = {};
+    if (customerDetails.name.length < 2) {
+      errors.name = 'Full name is required (min 2 characters).';
+    } else if (!/^[a-zA-Z\s.'-]{2,80}$/.test(customerDetails.name)) {
+      errors.name = 'Enter a valid full name.';
+    }
+    if (!customerDetails.email) {
+      errors.email = 'Registered email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerDetails.email)) {
+      errors.email = 'Registered email is missing or invalid.';
+    }
+    return errors;
+  }, [customerDetails.name, customerDetails.email]);
+
+  const detailsComplete = Object.keys(detailsErrors).length === 0;
+
+  useEffect(() => {
+    if (readyToPay && !detailsComplete) {
+      setReadyToPay(false);
+    }
+  }, [readyToPay, detailsComplete]);
+
+  const markDirty = () => {
+    setReadyToPay(false);
+    setFormError('');
+    setFieldErrors({});
+  };
 
   const toggleSecretVisibility = (key) => {
     setShowSecrets((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -180,32 +222,58 @@ export default function MembershipCheckout() {
     setFormError('');
     setFieldErrors({});
     setReadyToPay(false);
-    setByokCredentials(null);
 
-    const errors = {};
     if (!plan) {
       setFormError('Please select a membership plan first.');
       return;
     }
-    if (customerDetails.name.length < 2) errors.name = 'Enter your full name.';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerDetails.email)) {
-      errors.email = 'Enter a valid email address.';
-    }
-    const digits = customerDetails.phone.replace(/\D/g, '');
-    if (!digits || digits.length < 10) {
-      errors.phone = 'Enter a 10-digit mobile number for UPI.';
-    }
-    if (isByok) {
-      const msg = validateByokForm(byokProvider, byokValues);
-      if (msg) errors.byok = msg;
-    }
-    if (Object.keys(errors).length) {
-      setFieldErrors(errors);
-      setFormError(toErrorText(Object.values(errors)[0], 'Please fix the highlighted fields.'));
+    if (!detailsComplete) {
+      setFieldErrors(detailsErrors);
+      setFormError(
+        toErrorText(Object.values(detailsErrors)[0], 'Please fill all required details first.')
+      );
       return;
     }
-    if (isByok) setByokCredentials(buildByokPayload(byokProvider, byokValues));
     setReadyToPay(true);
+  };
+
+  const connectBrokerAfterPayment = async (e) => {
+    e.preventDefault();
+    setFormError('');
+    setFieldErrors({});
+    const msg = validateByokForm(byokProvider, byokValues);
+    if (msg) {
+      setFieldErrors({ byok: msg });
+      setFormError(msg);
+      return;
+    }
+    setByokSubmitting(true);
+    try {
+      const payload = buildByokPayload(byokProvider, byokValues);
+      const res = await updateByokCredentialsApi(payload);
+      if (res?.user) dispatch(updateUser(res.user));
+      setSuccess(true);
+      setTimeout(() => navigate('/terminal'), 1200);
+    } catch (err) {
+      setFormError(
+        toErrorText(
+          err?.userMessage || err?.response?.data?.message || err?.message || err,
+          'Could not connect broker. Check your demat API keys and try again.'
+        )
+      );
+    } finally {
+      setByokSubmitting(false);
+    }
+  };
+
+  const skipBrokerConnect = () => {
+    // Paid BYOK without keys cannot use terminal — keep them on this step
+    if (mustConnectBroker || needsByokBrokerConnect(authUser)) {
+      setFormError('Broker API keys are required before you can open Terminal or Order Flow.');
+      return;
+    }
+    setSuccess(true);
+    setTimeout(() => navigate('/terminal'), 800);
   };
 
   const shell = (children) => (
@@ -253,7 +321,7 @@ export default function MembershipCheckout() {
     );
   }
 
-  if (!planId || !plan) {
+  if (!mustConnectBroker && (!planId || !plan)) {
     return shell(
       <div className="mx-auto max-w-md space-y-6 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0c1322]/90 p-8 sm:p-10 text-center shadow-xl dark:shadow-2xl backdrop-blur-xl">
         <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500 dark:text-amber-400">
@@ -291,6 +359,223 @@ export default function MembershipCheckout() {
     );
   }
 
+  /* ── Post-payment: connect demat / broker API (BYOK only) ── */
+  if (awaitingByok && isByok) {
+    return shell(
+      <div className="space-y-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Paid · Connect broker API
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3 bg-white/90 dark:bg-slate-900/60 px-4 py-2 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm">
+            <StepDot step={1} label="Plan" done />
+            <span className="h-0.5 w-4 bg-emerald-500/40 sm:w-8" />
+            <StepDot step={2} label="Details" done />
+            <span className="h-0.5 w-4 bg-emerald-500/40 sm:w-8" />
+            <StepDot step={3} label="Payment" done />
+            <span className="h-0.5 w-4 bg-emerald-500/40 sm:w-8" />
+            <StepDot step={4} label="Broker" active />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-50/90 via-white to-teal-50/50 dark:from-emerald-950/40 dark:via-[#0e1628] dark:to-[#0a1122] p-4 sm:p-5">
+          <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
+            Connect your demat / broker API
+          </h2>
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+            Plan{' '}
+            <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+              {plan?.name || authUser?.subscription?.plan || 'Your API'}
+            </span>{' '}
+            is unlocked. Broker API keys are required — Terminal / Order Flow stay locked until you connect.
+          </p>
+        </div>
+
+        <section className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white/95 dark:border-slate-800/90 dark:bg-[#0c1222]/90 shadow-xl backdrop-blur-2xl">
+          <form onSubmit={connectBrokerAfterPayment} className="p-5 sm:p-8 space-y-6">
+            {formError && (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-200 p-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
+                <div className="text-xs sm:text-sm font-medium">{formError}</div>
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-[#090e1a]/90 p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 dark:border-slate-800/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-white">
+                    Broker API Configuration
+                  </span>
+                </div>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  256-Bit Stored Encrypted
+                </span>
+              </div>
+
+              <fieldset disabled={byokSubmitting} className="space-y-4 disabled:opacity-60">
+                <div className="space-y-1.5 max-w-md">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Select your broker <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={byokProvider}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setByokProvider(id);
+                      setByokValues(emptyByokValues(id));
+                      setShowByokHelp(false);
+                    }}
+                    className="w-full rounded-xl border border-slate-300 bg-white dark:border-slate-700/80 dark:bg-[#0e1628] px-4 py-3 text-sm text-slate-900 dark:text-white font-medium focus:border-cyan-500 dark:focus:border-cyan-400 focus:outline-none cursor-pointer"
+                  >
+                    {BYOK_BROKERS.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.label}
+                        {b.short ? ` — ${b.short}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 dark:bg-emerald-950/20 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <div>
+                    <span className="font-bold text-emerald-900 dark:text-emerald-200">Zero Key Exposure: </span>
+                    Keys are validated once via broker API and stored encrypted. Never logged or shown in plaintext.
+                  </div>
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowByokHelp((s) => !s)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-bold text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/20"
+                  >
+                    <BookOpen className="h-3.5 w-3.5" />
+                    {showByokHelp ? 'Hide' : 'Need'} {broker.label} Setup Guide?
+                  </button>
+                  {showByokHelp && (
+                    <div className="mt-2.5 rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#080d18] p-4 space-y-3">
+                      <ol className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
+                        {broker.steps.slice(0, 4).map((step, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-[10px] font-bold text-cyan-700 dark:text-cyan-300 font-mono mt-0.5">
+                              {i + 1}
+                            </span>
+                            <span className="leading-relaxed">{step}</span>
+                          </li>
+                        ))}
+                      </ol>
+                      {broker.docsUrl && (
+                        <a
+                          href={broker.docsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-600 dark:text-cyan-400"
+                        >
+                          Open {broker.label} Developer Portal
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  {broker.fields.map((f) => {
+                    const isSecret = f.type === 'password';
+                    const isShown = showSecrets[f.key];
+                    const inputType = isSecret ? (isShown ? 'text' : 'password') : f.type || 'text';
+                    return (
+                      <div key={f.key} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                          <span>
+                            {f.label} {f.required && <span className="text-rose-500">*</span>}
+                          </span>
+                        </div>
+                        <div className="relative flex items-center">
+                          <input
+                            type={inputType}
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={byokValues[f.key] || ''}
+                            onChange={(e) =>
+                              setByokValues((v) => ({ ...v, [f.key]: e.target.value }))
+                            }
+                            placeholder={f.placeholder || ''}
+                            className={`w-full rounded-xl px-3.5 py-3 text-xs sm:text-sm font-mono text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700/80 bg-white dark:bg-[#0e1628] focus:border-cyan-500 dark:focus:border-cyan-400 focus:outline-none ${
+                              isSecret ? 'pr-10' : ''
+                            } ${
+                              fieldErrors.byok && f.required && !byokValues[f.key]
+                                ? 'border-rose-400'
+                                : ''
+                            }`}
+                          />
+                          {isSecret && (
+                            <button
+                              type="button"
+                              onClick={() => toggleSecretVisibility(f.key)}
+                              className="absolute right-3 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                            >
+                              {isShown ? <EyeOff size={15} /> : <Eye size={15} />}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {fieldErrors.byok && (
+                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-500">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    <span>{fieldErrors.byok}</span>
+                  </div>
+                )}
+              </fieldset>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                type="submit"
+                disabled={byokSubmitting}
+                className="group relative flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 py-4 px-6 text-sm font-black text-slate-950 shadow-xl shadow-emerald-500/20 hover:brightness-105 disabled:opacity-60"
+              >
+                {byokSubmitting ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Validating {broker.label}…
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="h-5 w-5" />
+                    Connect {broker.label} & Open Terminal
+                  </>
+                )}
+              </button>
+              {mustConnectBroker ? (
+                <p className="text-center text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                  Broker details required. Logout/login ke baad bhi yahi step pe aoge jab tak connect na ho.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  disabled={byokSubmitting}
+                  onClick={skipBrokerConnect}
+                  className="w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white transition"
+                >
+                  Skip for now — connect later from dashboard
+                </button>
+              )}
+            </div>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
   return shell(
     <div className="space-y-6">
       {/* ── Top Navigation & Stepper ─────────────────────────── */}
@@ -311,6 +596,12 @@ export default function MembershipCheckout() {
           <StepDot step={2} label="Details" active={!readyToPay} done={readyToPay} />
           <span className={`h-0.5 w-4 sm:w-8 transition-colors ${readyToPay ? 'bg-emerald-500/40' : 'bg-slate-200 dark:bg-slate-800'}`} />
           <StepDot step={3} label="Payment" active={readyToPay} />
+          {isByok && (
+            <>
+              <span className="h-0.5 w-4 sm:w-8 bg-slate-200 dark:bg-slate-800" />
+              <StepDot step={4} label="Broker" />
+            </>
+          )}
         </div>
       </div>
 
@@ -412,7 +703,7 @@ export default function MembershipCheckout() {
             </div>
 
             <fieldset disabled={readyToPay} className="disabled:opacity-60 transition-opacity">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Full Name */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -427,6 +718,8 @@ export default function MembershipCheckout() {
                       }}
                       placeholder="e.g. Rahul Sharma"
                       autoComplete="name"
+                      required
+                      minLength={2}
                       style={{ outline: 'none' }}
                       className={`w-full rounded-xl px-3.5 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all focus:outline-none focus-visible:outline-none focus:ring-0 ${
                         fieldErrors.name
@@ -442,69 +735,33 @@ export default function MembershipCheckout() {
                   )}
                 </div>
 
-                {/* Email Address */}
+                {/* Registered Email */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Email address <span className="text-rose-500 dark:text-rose-400">*</span>
+                    Registered email <span className="text-rose-500 dark:text-rose-400">*</span>
                   </label>
                   <div className="relative flex items-center">
                     <input
                       type="email"
                       value={email}
-                      onChange={(e) => {
-                        markDirty();
-                        setEmail(e.target.value);
-                      }}
-                      placeholder="you@email.com"
+                      readOnly
+                      required
                       autoComplete="email"
                       style={{ outline: 'none' }}
-                      className={`w-full rounded-xl px-3.5 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all focus:outline-none focus-visible:outline-none focus:ring-0 ${
+                      className={`w-full rounded-xl px-3.5 py-3 text-sm text-slate-900 dark:text-white cursor-default bg-slate-50 dark:bg-[#0a1220] transition-all focus:outline-none focus-visible:outline-none focus:ring-0 ${
                         fieldErrors.email
-                          ? 'border border-rose-400 bg-rose-50/50 dark:border-rose-500 dark:bg-rose-950/20 focus:border-rose-500'
-                          : 'border border-slate-300 bg-white hover:border-slate-400 focus:border-cyan-500 dark:border-slate-700/80 dark:bg-[#0e1628] dark:hover:border-slate-600 dark:focus:border-cyan-400'
+                          ? 'border border-rose-400 dark:border-rose-500'
+                          : 'border border-slate-300 dark:border-slate-700/80'
                       }`}
                     />
                   </div>
-                  {fieldErrors.email && (
+                  {fieldErrors.email ? (
                     <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-500 dark:text-rose-400 mt-1">
                       <AlertCircle className="h-3 w-3" /> {fieldErrors.email}
                     </span>
-                  )}
-                </div>
-
-                {/* Mobile Number for UPI */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Mobile (for UPI) <span className="text-rose-500 dark:text-rose-400">*</span>
-                  </label>
-                  <div className="relative flex items-center">
-                    <span className="absolute left-3.5 select-none text-xs font-bold font-mono text-slate-500 dark:text-slate-400">
-                      +91
-                    </span>
-                    <input
-                      value={phone}
-                      onChange={(e) => {
-                        markDirty();
-                        setPhone(e.target.value);
-                      }}
-                      placeholder="10-digit mobile"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      style={{ outline: 'none' }}
-                      className={`w-full rounded-xl pl-12 pr-3.5 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all focus:outline-none focus-visible:outline-none focus:ring-0 font-mono ${
-                        fieldErrors.phone
-                          ? 'border border-rose-400 bg-rose-50/50 dark:border-rose-500 dark:bg-rose-950/20 focus:border-rose-500'
-                          : 'border border-slate-300 bg-white hover:border-slate-400 focus:border-cyan-500 dark:border-slate-700/80 dark:bg-[#0e1628] dark:hover:border-slate-600 dark:focus:border-cyan-400'
-                      }`}
-                    />
-                  </div>
-                  {fieldErrors.phone ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-500 dark:text-rose-400 mt-1">
-                      <AlertCircle className="h-3 w-3" /> {fieldErrors.phone}
-                    </span>
                   ) : (
                     <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                      Used for Razorpay UPI checkout request & receipt.
+                      From your login account — used for payment receipt.
                     </p>
                   )}
                 </div>
@@ -512,179 +769,31 @@ export default function MembershipCheckout() {
             </fieldset>
           </div>
 
-          {/* ── SECTION 2: Broker API Credentials (BYOK) ───────── */}
-          {isByok && (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-[#090e1a]/90 p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 dark:border-slate-800/80 pb-3">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
-                  <span className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-white">
-                    Broker API Configuration
-                  </span>
-                </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  256-Bit Stored Encrypted
-                </span>
+          {/* BYOK: broker keys are collected only after payment succeeds */}
+          {isByok && !readyToPay && (
+            <div className="flex items-start gap-3 rounded-2xl border border-cyan-500/25 bg-cyan-500/10 dark:bg-cyan-950/20 p-4 text-xs text-cyan-900 dark:text-cyan-200 leading-relaxed">
+              <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-400" />
+              <div>
+                <span className="font-bold">BYOK next step: </span>
+                After payment confirms, you will connect your demat / broker API keys (Upstox, Kotak, Groww, or Angel One).
               </div>
-
-              <fieldset disabled={readyToPay} className="space-y-4 disabled:opacity-60 transition-opacity">
-                {/* Select Broker */}
-                <div className="space-y-1.5 max-w-md">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Select your broker <span className="text-rose-500 dark:text-rose-400">*</span>
-                  </label>
-                  <select
-                    value={byokProvider}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      markDirty();
-                      setByokProvider(id);
-                      setByokValues(emptyByokValues(id));
-                      setShowByokHelp(false);
-                    }}
-                    className="w-full rounded-xl border border-slate-300 bg-white dark:border-slate-700/80 dark:bg-[#0e1628] px-4 py-3 text-sm text-slate-900 dark:text-white font-medium hover:border-slate-400 dark:hover:border-slate-600 focus:border-cyan-500 dark:focus:border-cyan-400 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 cursor-pointer transition appearance-none bg-[length:1rem] bg-[right_0.85rem_center] bg-no-repeat shadow-sm"
-                    style={{
-                      outline: 'none',
-                      boxShadow: 'none',
-                      WebkitFocusRingColor: 'transparent',
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='${isDark ? '%2338bdf8' : '%230284c7'}'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`
-                    }}
-                  >
-                    {BYOK_BROKERS.map((b) => (
-                      <option key={b.id} value={b.id} className="bg-white text-slate-900 dark:bg-slate-900 dark:text-white">
-                        {b.label}
-                        {b.short ? ` — ${b.short}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Security Guarantee Banner */}
-                <div className="flex items-start gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 dark:bg-emerald-950/20 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed backdrop-blur-sm">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                  <div>
-                    <span className="font-bold text-emerald-900 dark:text-emerald-200">Zero Key Exposure: </span>
-                    Keys are validated once directly via broker API and stored encrypted. Never logged or shown in plaintext.
-                  </div>
-                </div>
-
-                {/* Setup Help Toggle */}
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowByokHelp((s) => !s)}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-bold text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-900 dark:hover:text-white transition"
-                  >
-                    <BookOpen className="h-3.5 w-3.5" />
-                    {showByokHelp ? 'Hide' : 'Need'} {broker.label} Setup Guide?
-                  </button>
-
-                  {showByokHelp && (
-                    <div className="mt-2.5 rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#080d18] p-4 space-y-3 shadow-sm dark:shadow-none animate-fadeIn">
-                      <div className="text-xs font-bold text-cyan-700 dark:text-cyan-300 uppercase tracking-wider">
-                        {broker.label} Quick Setup Steps
-                      </div>
-                      <ol className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
-                        {broker.steps.slice(0, 4).map((step, i) => (
-                          <li key={i} className="flex items-start gap-2">
-                            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-[10px] font-bold text-cyan-700 dark:text-cyan-300 font-mono mt-0.5">
-                              {i + 1}
-                            </span>
-                            <span className="leading-relaxed">{step}</span>
-                          </li>
-                        ))}
-                      </ol>
-                      {broker.docsUrl && (
-                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                          <a
-                            href={broker.docsUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-600 hover:text-cyan-700 dark:text-cyan-400 dark:hover:text-cyan-300"
-                          >
-                            <span>Open {broker.label} Developer Portal</span>
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Broker Dynamic Fields */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                  {broker.fields.map((f) => {
-                    const isSecret = f.type === 'password';
-                    const isShown = showSecrets[f.key];
-                    const inputType = isSecret ? (isShown ? 'text' : 'password') : (f.type || 'text');
-
-                    return (
-                      <div key={f.key} className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                          <span>
-                            {f.label} {f.required && <span className="text-rose-500 dark:text-rose-400">*</span>}
-                          </span>
-                          {!f.required && (
-                            <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                              Optional
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="relative flex items-center">
-                          <input
-                            type={inputType}
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={byokValues[f.key] || ''}
-                            onChange={(e) => {
-                              markDirty();
-                              setByokValues((v) => ({ ...v, [f.key]: e.target.value }));
-                            }}
-                            placeholder={f.placeholder || ''}
-                            style={{ outline: 'none' }}
-                            className={`w-full rounded-xl px-3.5 py-3 text-xs sm:text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all focus:outline-none focus-visible:outline-none focus:ring-0 ${
-                              isSecret ? 'pr-10' : ''
-                            } ${
-                              fieldErrors.byok && f.required && !byokValues[f.key]
-                                ? 'border border-rose-400 bg-rose-50/50 dark:border-rose-500 dark:bg-rose-950/20 focus:border-rose-500'
-                                : 'border border-slate-300 bg-white hover:border-slate-400 focus:border-cyan-500 dark:border-slate-700/80 dark:bg-[#0e1628] dark:hover:border-slate-600 dark:focus:border-cyan-400'
-                            }`}
-                          />
-
-                          {isSecret && (
-                            <button
-                              type="button"
-                              onClick={() => toggleSecretVisibility(f.key)}
-                              className="absolute right-3 text-slate-400 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white transition"
-                              title={isShown ? 'Hide token' : 'Show token'}
-                            >
-                              {isShown ? <EyeOff size={15} /> : <Eye size={15} />}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {fieldErrors.byok && (
-                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-500 dark:text-rose-400">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    <span>{fieldErrors.byok}</span>
-                  </div>
-                )}
-              </fieldset>
             </div>
           )}
 
-          {/* ── SECTION 3: Primary CTA Button or Payment Box ──── */}
+          {/* ── Primary CTA Button or Payment Box ──── */}
           {!readyToPay ? (
             <div className="space-y-3 pt-2">
               <button
                 type="submit"
-                className="group relative flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 py-4 px-6 text-sm sm:text-base font-black text-slate-950 shadow-xl shadow-emerald-500/20 hover:shadow-emerald-500/35 hover:brightness-105 active:scale-[0.99] transition-all cursor-pointer"
+                disabled={!detailsComplete || !plan}
+                title={
+                  !detailsComplete
+                    ? 'Pehle full name aur email fill karo'
+                    : !plan
+                      ? 'Plan select karo'
+                      : undefined
+                }
+                className="group relative flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 py-4 px-6 text-sm sm:text-base font-black text-slate-950 shadow-xl shadow-emerald-500/20 hover:shadow-emerald-500/35 hover:brightness-105 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100 disabled:shadow-none"
               >
                 <span>Continue to Secure Payment</span>
                 <span className="font-mono bg-slate-950/20 px-2 py-0.5 rounded-md text-slate-950 font-bold">
@@ -692,6 +801,11 @@ export default function MembershipCheckout() {
                 </span>
                 <CreditCard className="h-5 w-5 transition-transform group-hover:translate-x-0.5" />
               </button>
+              {!detailsComplete && (
+                <p className="text-center text-[11px] font-semibold text-rose-500 dark:text-rose-400">
+                  Full name aur registered email required — pehle details complete karo.
+                </p>
+              )}
 
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400 pt-1">
                 <span className="inline-flex items-center gap-1">
@@ -717,7 +831,9 @@ export default function MembershipCheckout() {
                     Ready to pay ₹{finalPrice.toLocaleString('en-IN')}
                   </h4>
                   <p className="text-xs text-emerald-700 dark:text-emerald-300/80">
-                    UPI recommended for zero-fee, instant membership activation.
+                    {isByok
+                      ? 'Pay now to activate membership — broker keys come next.'
+                      : 'UPI recommended for zero-fee, instant membership activation.'}
                   </p>
                 </div>
                 <div className="text-right">
@@ -727,25 +843,42 @@ export default function MembershipCheckout() {
                 </div>
               </div>
 
-              {/* Razorpay Component Container */}
               <div className="pt-1">
                 <RazorpayCheckout
                   planId={plan.id}
                   amount={plan.price}
                   customerDetails={customerDetails}
-                  byokCredentials={byokCredentials}
                   description={plan.name}
                   buttonLabel={`Pay ₹${finalPrice.toLocaleString('en-IN')} with Razorpay`}
-                  onSuccess={({ user }) => {
+                  onSuccess={({ user, membershipActivated, paymentVerified }) => {
                     if (user) dispatch(updateUser(user));
-                    setSuccess(true);
-                    setTimeout(() => navigate('/terminal'), 1200);
+                    setFormError('');
+                    // Paid successfully — never send user back to "pay again"
+                    if (isByok) {
+                      setAwaitingByok(true);
+                      setReadyToPay(false);
+                      return;
+                    }
+                    if (membershipActivated || paymentVerified) {
+                      setSuccess(true);
+                      setTimeout(() => navigate('/terminal'), 1200);
+                    }
                   }}
                   onFailure={(err) => {
+                    // Ignore soft "membership not active yet" after a verified pay
+                    const raw = String(err?.userMessage || err?.message || err?.description || '');
+                    if (/payment (received|confirmed|verified)/i.test(raw) && /membership/i.test(raw)) {
+                      if (isByok) {
+                        setAwaitingByok(true);
+                        setReadyToPay(false);
+                        setFormError('');
+                        return;
+                      }
+                    }
                     setFormError(
                       toErrorText(
                         err?.userMessage || err?.message || err?.description || err,
-                        'Payment failed. Check broker keys / Razorpay and try again.'
+                        'Payment failed. Please try again with UPI or another method.'
                       )
                     );
                     setReadyToPay(false);

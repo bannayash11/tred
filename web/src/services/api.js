@@ -62,6 +62,20 @@ api.interceptors.response.use(
 let socket = null;
 export const getSocket = () => {
   const token = localStorage.getItem(TOKEN_KEY);
+  // Never open a market socket without a real JWT (avoids guest use of server keys)
+  if (!token || token === 'null' || token === 'undefined') {
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    }
+    return {
+      on() {},
+      off() {},
+      emit() {},
+      disconnect() {},
+      connected: false
+    };
+  }
   // Recreate when auth token changes so Socket.io handshake carries JWT
   if (socket && socket.__authToken !== token) {
     socket.disconnect();

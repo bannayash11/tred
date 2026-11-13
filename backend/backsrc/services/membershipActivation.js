@@ -34,7 +34,7 @@ export function sanitizeUser(user) {
  * @param {object} opts
  * @param {string} opts.userId
  * @param {string} opts.planId
- * @param {object|null} opts.byokCredentials - raw creds (validated here) OR null
+ * @param {object|null} opts.byokCredentials - optional raw creds (validated here); can connect after payment
  * @param {object|null} opts.byokBundle - already-built encrypted bundle from create-order
  * @param {object|null} opts.existingUser - optional lean user for byokGranted check
  */
@@ -76,12 +76,7 @@ export async function activateMembershipForUser({
   }
 
   let bundle = byokBundle || null;
-  if (mode === 'byok' && !bundle) {
-    if (!byokCredentials) {
-      const err = new Error('BYOK broker credentials are required for this plan.');
-      err.statusCode = 400;
-      throw err;
-    }
+  if (mode === 'byok' && !bundle && byokCredentials) {
     try {
       const connected = await connectByok(byokCredentials);
       bundle = connected.bundle;
@@ -90,6 +85,7 @@ export async function activateMembershipForUser({
       throw err;
     }
   }
+  // BYOK membership can activate without broker keys — user connects demat/API after payment.
 
   const days = Number(plan.durationDays) || (Number(plan.durationMonths) || 1) * 30;
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
@@ -118,6 +114,9 @@ export async function activateMembershipForUser({
     user.subscription = subscription;
     if (bundle) {
       user.byok = bundle;
+    } else if (mode === 'byok') {
+      // Paid BYOK member — broker connect happens post-payment
+      user.byok = { status: 'none' };
     } else if (mode === 'server' && !user.byok) {
       user.byok = { status: 'none' };
     }
@@ -129,7 +128,11 @@ export async function activateMembershipForUser({
     const mem = memoryUsers.get(String(userId));
     if (mem) {
       mem.subscription = subscription;
-      if (bundle) mem.byok = bundle;
+      if (bundle) {
+        mem.byok = bundle;
+      } else if (mode === 'byok') {
+        mem.byok = { status: 'none' };
+      }
       return { user: sanitizeUser(mem), plan, mode };
     }
   }

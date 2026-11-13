@@ -70,9 +70,9 @@ export default function ByokCredentialsForm({
               <KeyRound className="h-3 w-3" />
               BYOK · Bring Your Own Key
             </div>
-            <h3 className="text-base font-bold text-white">Connect your broker</h3>
+            <h3 className="text-base font-bold text-white">Connect your demat / broker</h3>
             <p className="text-[11px] text-slate-400 mt-1">
-              Activating <span className="text-cyan-300 font-semibold">{plan.name}</span>
+              Membership plan <span className="text-cyan-300 font-semibold">{plan.name}</span>
               {Number(plan.originalPrice) > Number(plan.price) && (
                 <>
                   {' '}
@@ -201,7 +201,7 @@ export default function ByokCredentialsForm({
                 Validating {broker.label}…
               </>
             ) : (
-              <>Activate with {broker.label}</>
+              <>Connect {broker.label}</>
             )}
           </button>
         </form>

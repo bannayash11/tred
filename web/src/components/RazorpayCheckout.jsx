@@ -33,7 +33,7 @@ function loadRazorpayScript() {
  * - planId (required)
  * - amount (number, INR — must match plan.price)
  * - customerDetails: { name, email, phone }
- * - byokCredentials?: object (required for BYOK plans — validated before order create)
+ * - byokCredentials?: object (optional; BYOK keys are normally collected after payment)
  * - description?: string
  * - buttonLabel?: string
  * - className?: string
@@ -179,24 +179,28 @@ export default function RazorpayCheckout({
               throw new Error(toErrorText(verifyRes?.message, 'Payment verification failed.'));
             }
 
-            if (!verifyRes.membershipActivated && verifyRes.paymentVerified) {
-              const msg = toErrorText(
-                verifyRes.message,
-                'Payment received but membership is not active yet. Contact support with your Order ID.'
+            // Payment verified = success. Membership may activate now or after BYOK connect.
+            if (verifyRes.paymentVerified || verifyRes.membershipActivated) {
+              const activated = !!verifyRes.membershipActivated;
+              setStatus('success');
+              setMessage(
+                activated
+                  ? 'Payment confirmed. Membership activated!'
+                  : 'Payment confirmed! Next step: connect your broker.'
               );
-              setStatus('failed');
-              setMessage(msg);
-              onFailure?.({ ...verifyRes, message: msg, userMessage: msg });
+              onSuccess?.({
+                payment: verifyRes.payment,
+                user: verifyRes.user,
+                membershipActivated: activated,
+                paymentVerified: true,
+                message: verifyRes.message
+              });
               return;
             }
 
-            setStatus('success');
-            setMessage('Payment confirmed. Membership activated!');
-            onSuccess?.({
-              payment: verifyRes.payment,
-              user: verifyRes.user,
-              membershipActivated: !!verifyRes.membershipActivated
-            });
+            throw new Error(
+              toErrorText(verifyRes.message, 'Payment could not be confirmed. Please try again.')
+            );
           } catch (err) {
             const msg = toErrorText(
               err?.userMessage || err?.message || err,
@@ -255,7 +259,7 @@ export default function RazorpayCheckout({
       }
       const msg = toErrorText(
         err?.userMessage || err?.message || err,
-        'Unable to start checkout. Check broker keys and try again.'
+        'Unable to start checkout. Please try again.'
       );
       setStatus('failed');
       setMessage(msg);
@@ -309,6 +313,14 @@ export default function RazorpayCheckout({
     );
   }
 
+  if (status === 'success') {
+    return (
+      <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-3 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+        {message || 'Payment confirmed.'}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <button
@@ -332,12 +344,6 @@ export default function RazorpayCheckout({
           </>
         )}
       </button>
-
-      {status === 'success' && (
-        <div className="rounded-xl border border-emerald-800 bg-emerald-950/80 px-3 py-2 text-xs font-semibold text-emerald-300">
-          {message}
-        </div>
-      )}
 
       {status === 'failed' && (
         <div className="flex items-start gap-2 rounded-xl border border-rose-800 bg-rose-950/80 px-3 py-2 text-xs font-semibold text-rose-300">

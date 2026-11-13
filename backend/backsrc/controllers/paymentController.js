@@ -68,7 +68,8 @@ async function activateMembershipFromPayment(paymentDoc, { byokCredentials = nul
 
   let byokBundle = null;
   if (mode === 'byok') {
-    // Prefer pending encrypted bundle saved at create-order
+    // Optional: keys sent at create-order (legacy) or at verify. Otherwise activate
+    // membership first and let the client connect broker after payment.
     const withCipher =
       paymentDoc.pendingByokCipher != null
         ? paymentDoc
@@ -79,13 +80,6 @@ async function activateMembershipFromPayment(paymentDoc, { byokCredentials = nul
     if (!byokBundle && byokCredentials) {
       const connected = await connectByok(byokCredentials);
       byokBundle = connected.bundle;
-    }
-    if (!byokBundle) {
-      return {
-        activated: false,
-        reason: 'byok_credentials_required',
-        message: 'Payment captured. Complete BYOK key submission to finish activation.'
-      };
     }
   }
 
@@ -175,27 +169,24 @@ export const createOrder = async (req, res) => {
       });
     }
 
+    // BYOK keys are optional at order time — preferred flow is: pay → then connect broker.
     let pendingByokCipher = null;
     if (mode === 'byok') {
       const creds = req.body?.byokCredentials;
-      if (!creds || typeof creds !== 'object') {
-        return res.status(400).json({
-          success: false,
-          message: 'BYOK broker credentials are required before payment.'
-        });
-      }
-      try {
-        const connected = await connectByok(creds);
-        pendingByokCipher = encryptObject(connected.bundle);
-      } catch (err) {
-        const msg = String(err?.message || '').trim();
-        return res.status(err.statusCode || 400).json({
-          success: false,
-          message:
-            msg && msg !== '[object Object]'
-              ? msg
-              : 'Could not validate BYOK broker credentials. Check keys and try again.'
-        });
+      if (creds && typeof creds === 'object') {
+        try {
+          const connected = await connectByok(creds);
+          pendingByokCipher = encryptObject(connected.bundle);
+        } catch (err) {
+          const msg = String(err?.message || '').trim();
+          return res.status(err.statusCode || 400).json({
+            success: false,
+            message:
+              msg && msg !== '[object Object]'
+                ? msg
+                : 'Could not validate BYOK broker credentials. Check keys and try again.'
+          });
+        }
       }
     }
 

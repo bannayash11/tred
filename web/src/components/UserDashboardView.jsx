@@ -294,7 +294,7 @@ export default function UserDashboardView({ onOpenPricing }) {
                 {planName}
                 {feedMode === 'byok' && (
                   <span className="rounded-full bg-violet-950/80 text-violet-300 border border-violet-800/60 px-2 py-0.5 text-[10px] font-bold">
-                    BYOK{byokStatus === 'connected' ? ' · linked' : ''}
+                    BYOK{byokStatus === 'connected' ? ' · linked' : ' · connect broker'}
                   </span>
                 )}
                 {feedMode === 'server' && status === 'active' && (

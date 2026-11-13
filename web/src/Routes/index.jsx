@@ -118,7 +118,7 @@ export default function AppRoutes() {
         <Route
           path="checkout"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowByokPending>
               <MembershipCheckout />
             </ProtectedRoute>
           }
