@@ -53,6 +53,7 @@ import { applyTheme } from '@/lib/applyTheme';
 import { FlowChart } from './FlowChart';
 import { MiniChart } from './FlowPopup';
 import { FlowSpread } from './FlowSectors';
+import { chartPath } from '../../../../lib/chartRoutes';
 import { useBox } from './useBox';
 import type { Underlying } from '@/lib/underlyings';
 
@@ -1175,7 +1176,7 @@ function FlowMobileDetailSheet({
           <div className="pt-1">
             <button
               type="button"
-              onClick={() => navigate(`/chart/${stock.symbol}`)}
+              onClick={() => navigate(chartPath(stock.symbol))}
               className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 active:scale-[0.99] transition-all"
             >
               <span>Open {stock.symbol} Full Chart</span>

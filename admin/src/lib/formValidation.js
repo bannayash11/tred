@@ -24,7 +24,7 @@ export function firstError(errors) {
   return vals[0] || '';
 }
 
-export function fieldBorderClass(hasError, ok = 'border-slate-800 focus:border-amber-400') {
+export function fieldBorderClass(hasError, ok = 'border-admin-border focus:border-admin-accent') {
   return hasError ? 'border-rose-600 focus:border-rose-500' : ok;
 }
 

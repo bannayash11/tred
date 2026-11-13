@@ -96,10 +96,12 @@ export const getSocket = () => {
 export const fetchScreener = () => api.get('/screener/live').then((res) => res.data);
 export const fetchMarketXRay = () => api.get('/screener/market-xray').then((res) => res.data);
 export const fetchOpeningMomentum = () => api.get('/screener/opening-momentum').then((res) => res.data);
-export const fetchDirectionalScanner = (params = {}) =>
-  api.get('/directional-scanner/live', { params }).then((res) => res.data);
-export const fetchAlphaMove2 = (params = {}) =>
-  api.get('/alpha-move-2/live', { params }).then((res) => res.data);
+export const fetchOpeningMomentumHistoryDates = (limit = 30) =>
+  api.get('/screener/opening-momentum/history/dates', { params: { limit } }).then((res) => res.data);
+export const fetchOpeningMomentumHistoryLatest = () =>
+  api.get('/screener/opening-momentum/history/latest').then((res) => res.data);
+export const fetchOpeningMomentumHistory = (date) =>
+  api.get(`/screener/opening-momentum/history/${encodeURIComponent(date)}`).then((res) => res.data);
 export const fetchStock = (symbol, { timeframe = '5m', rangeDays = 30 } = {}) =>
   api
     .get(`/screener/stock/${encodeURIComponent(symbol)}`, {
@@ -107,6 +109,7 @@ export const fetchStock = (symbol, { timeframe = '5m', rangeDays = 30 } = {}) =>
     })
     .then((res) => res.data);
 export const fetchPublicAnnouncement = () => api.get('/admin/public-announcement').then((res) => res.data);
+export const fetchPublicSocial = () => api.get('/admin/public-social').then((res) => res.data);
 
 export const fetchTierRules = () => api.get('/content/tier-rules').then((res) => res.data);
 
@@ -123,13 +126,16 @@ export const fetchPublicSignupSettings = () =>
 export const activateMembershipApi = (data) =>
   api.post('/auth/activate-membership', data).then((res) => res.data);
 
-/** Razorpay checkout */
+/** Razorpay + UTR checkout */
 export const createPaymentOrder = (data) =>
   api.post('/payment/create-order', data).then((res) => res.data);
 export const verifyPaymentApi = (data) =>
   api.post('/payment/verify', data).then((res) => res.data);
 export const markPaymentFailedApi = (data) =>
   api.post('/payment/failed', data).then((res) => res.data);
+export const fetchUtrConfig = () => api.get('/payment/utr-config').then((res) => res.data);
+export const submitUtrPaymentApi = (data) =>
+  api.post('/payment/utr/submit', data).then((res) => res.data);
 export const fetchMyPaymentHistory = (params = {}) =>
   api.get('/payment/my-history', { params }).then((res) => res.data);
 export const cancelMembershipApi = (data = {}) =>

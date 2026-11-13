@@ -13,19 +13,28 @@ import {
   FileText,
   Zap,
   CreditCard,
+  Settings2,
+  Mail,
+  Share2,
   X
 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
+
+const WEB_URL =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000'
+    : 'https://tradrift.in';
 
 function SidebarPanel({ onClose, showClose }) {
   const { adminUser, usersList, plansList, seoPages, cmsPages, showToast, requestLogout } = useAdmin();
   const isSubAdmin = adminUser?.role === 'subadmin';
 
   const linkClass = ({ isActive }) =>
-    `flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all ${
+    `flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
       isActive
-        ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20 font-bold'
-        : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+        ? 'bg-admin-accent/15 text-admin-accent'
+        : 'text-slate-300 hover:bg-white/5 hover:text-white'
     }`;
 
   const handleNav = () => {
@@ -33,168 +42,199 @@ function SidebarPanel({ onClose, showClose }) {
   };
 
   return (
-    <aside className="w-72 max-w-[85vw] border-r border-slate-800/80 bg-[#0a0f1d] flex flex-col justify-between h-full shrink-0">
-      <div className="min-h-0 flex-1 flex flex-col">
-        <div className="flex items-center justify-between gap-2 p-4 sm:p-5 border-b border-slate-800/80">
-          <div className="flex items-center space-x-3 min-w-0">
-            <img
-              src="/brand/tradrift-logo.svg"
-              alt="Tradrift"
-              className="h-10 w-10 rounded-xl shadow-md shadow-amber-500/20 shrink-0"
-            />
+    <aside className="flex h-full w-64 max-w-[85vw] shrink-0 flex-col border-r border-admin-border bg-admin-surface">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center justify-between gap-2 border-b border-admin-border px-4 py-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <img src="/brand/tradrift-logo.svg" alt="Tradrift" className="h-9 w-9 shrink-0 rounded-lg" />
             <div className="min-w-0">
-              <div className="text-base font-extrabold tracking-tight text-white truncate">
-                Trad<span className="text-amber-400">rift</span>
+              <div className="truncate text-sm font-semibold text-white">
+                Trad<span className="text-admin-accent">rift</span>
               </div>
-              <span
-                className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border ${
-                  isSubAdmin
-                    ? 'bg-purple-950/80 text-purple-400 border-purple-800/60'
-                    : 'bg-amber-950/80 text-amber-400 border-amber-800/60'
-                }`}
-              >
-                {isSubAdmin ? 'SUB-ADMIN' : 'SUPER ADMIN'}
-              </span>
+              <div className="text-[11px] text-admin-muted">{isSubAdmin ? 'Sub-Admin' : 'Super Admin'}</div>
             </div>
           </div>
           {showClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl bg-slate-800 p-2 text-slate-300 hover:text-white shrink-0"
-              aria-label="Close sidebar"
-            >
+            <button type="button" onClick={onClose} className="admin-btn-ghost p-2" aria-label="Close sidebar">
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
-        <div className="p-3 sm:p-4 space-y-5 overflow-y-auto flex-1">
+        <nav className="flex-1 space-y-5 overflow-y-auto p-3">
           <div className="space-y-1">
-            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              Users & Membership
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-admin-muted">
+              Membership
             </div>
             <NavLink to="/traders" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
+              <span className="flex items-center gap-2.5">
                 <Users className="h-4 w-4" />
-                <span>Traders</span>
-              </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{usersList.length}</span>
+                Traders
+              </span>
+              <span className="rounded bg-admin-bg px-1.5 py-0.5 text-[10px] text-admin-muted">
+                {usersList.filter((u) => u.role !== 'admin' && u.role !== 'subadmin').length}
+              </span>
             </NavLink>
             <NavLink to="/plans" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
+              <span className="flex items-center gap-2.5">
                 <Sliders className="h-4 w-4" />
-                <span>Plans Manager</span>
-              </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{plansList.length}</span>
+                Plans
+              </span>
+              <span className="rounded bg-admin-bg px-1.5 py-0.5 text-[10px] text-admin-muted">
+                {plansList.length}
+              </span>
             </NavLink>
-            <NavLink to="/payments" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
+            <NavLink to="/payments/history" onClick={handleNav} className={linkClass}>
+              <span className="flex items-center gap-2.5">
                 <CreditCard className="h-4 w-4" />
-                <span>Payments</span>
-              </div>
+                Payment history
+              </span>
+            </NavLink>
+            <NavLink to="/payments/settings" onClick={handleNav} className={linkClass}>
+              <span className="flex items-center gap-2.5">
+                <Settings2 className="h-4 w-4" />
+                Payment settings
+              </span>
             </NavLink>
           </div>
 
           <div className="space-y-1">
-            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Site</div>
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-admin-muted">
+              Content
+            </div>
             <NavLink to="/seo" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
+              <span className="flex items-center gap-2.5">
                 <Globe className="h-4 w-4" />
-                <span>SEO Manager</span>
-              </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{seoPages.length}</span>
+                SEO
+              </span>
+              <span className="rounded bg-admin-bg px-1.5 py-0.5 text-[10px] text-admin-muted">
+                {seoPages.length}
+              </span>
             </NavLink>
             <NavLink to="/cms" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
+              <span className="flex items-center gap-2.5">
                 <FileText className="h-4 w-4" />
-                <span>CMS Pages</span>
-              </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{cmsPages.length}</span>
+                CMS
+              </span>
+              <span className="rounded bg-admin-bg px-1.5 py-0.5 text-[10px] text-admin-muted">
+                {cmsPages.length}
+              </span>
             </NavLink>
-          </div>
-
-          <div className="space-y-1">
-            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">System</div>
             <NavLink
-              to="/broker"
+              to="/social"
               onClick={(e) => {
                 if (isSubAdmin) {
                   e.preventDefault();
-                  showToast('⚠️ Broker API credentials are restricted to Super Admin only.');
+                  showToast('Social Media is Super Admin only.');
                   return;
                 }
                 handleNav();
               }}
               className={linkClass}
             >
-              <div className="flex items-center space-x-2.5">
-                <KeyRound className="h-4 w-4" />
-                <span>Broker API</span>
-              </div>
-              {isSubAdmin && (
-                <span className="rounded bg-rose-950 px-1.5 py-0.5 text-[9px] font-bold text-rose-400 border border-rose-800/50">
-                  LOCKED
-                </span>
-              )}
-            </NavLink>
-            <NavLink to="/broadcast" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
-                <Megaphone className="h-4 w-4" />
-                <span>Broadcast</span>
-              </div>
-            </NavLink>
-            <NavLink to="/monitor" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
-                <Activity className="h-4 w-4" />
-                <span>SMC Monitor</span>
-              </div>
-            </NavLink>
-            <NavLink to="/opening-momentum" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
-                <Zap className="h-4 w-4 text-amber-400" />
-                <span>5M Momentum</span>
-              </div>
-              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-400 border border-amber-500/20">
-                LIVE
+              <span className="flex items-center gap-2.5">
+                <Share2 className="h-4 w-4" />
+                Social Media
               </span>
             </NavLink>
           </div>
-        </div>
+
+          <div className="space-y-1">
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-admin-muted">
+              System
+            </div>
+            <NavLink
+              to="/broker"
+              onClick={(e) => {
+                if (isSubAdmin) {
+                  e.preventDefault();
+                  showToast('Broker API is Super Admin only.');
+                  return;
+                }
+                handleNav();
+              }}
+              className={linkClass}
+            >
+              <span className="flex items-center gap-2.5">
+                <KeyRound className="h-4 w-4" />
+                Broker API
+              </span>
+              {isSubAdmin && (
+                <span className="admin-chip border-rose-800/50 bg-rose-950/50 text-rose-300">Locked</span>
+              )}
+            </NavLink>
+            <NavLink
+              to="/email-templates"
+              onClick={(e) => {
+                if (isSubAdmin) {
+                  e.preventDefault();
+                  showToast('Email Templates are Super Admin only.');
+                  return;
+                }
+                handleNav();
+              }}
+              className={linkClass}
+            >
+              <span className="flex items-center gap-2.5">
+                <Mail className="h-4 w-4" />
+                Email Templates
+              </span>
+              {isSubAdmin && (
+                <span className="admin-chip border-rose-800/50 bg-rose-950/50 text-rose-300">Locked</span>
+              )}
+            </NavLink>
+            <NavLink to="/broadcast" onClick={handleNav} className={linkClass}>
+              <span className="flex items-center gap-2.5">
+                <Megaphone className="h-4 w-4" />
+                Broadcast
+              </span>
+            </NavLink>
+            <NavLink to="/monitor" onClick={handleNav} className={linkClass}>
+              <span className="flex items-center gap-2.5">
+                <Activity className="h-4 w-4" />
+                Monitor
+              </span>
+            </NavLink>
+            <NavLink to="/opening-momentum" onClick={handleNav} className={linkClass}>
+              <span className="flex items-center gap-2.5">
+                <Zap className="h-4 w-4" />
+                5M Momentum
+              </span>
+            </NavLink>
+          </div>
+        </nav>
       </div>
 
-      <div className="p-4 border-t border-slate-800/80 bg-slate-950/60 space-y-3">
+      <div className="space-y-3 border-t border-admin-border bg-admin-bg/40 p-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center space-x-2 overflow-hidden min-w-0">
-            <div
-              className={`h-8 w-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                isSubAdmin ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-amber-500 text-black'
-              }`}
-            >
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-admin-accent/15 text-xs font-semibold text-admin-accent">
               {adminUser?.name ? adminUser.name.slice(0, 2).toUpperCase() : 'AD'}
             </div>
-            <div className="truncate min-w-0">
-              <div className="text-xs font-bold text-white truncate">{adminUser?.name || 'Administrator'}</div>
-              <div className="text-[10px] text-slate-400 truncate">{adminUser?.email || 'Admin'}</div>
+            <div className="min-w-0 truncate">
+              <div className="truncate text-xs font-semibold text-white">
+                {adminUser?.name || 'Administrator'}
+              </div>
+              <div className="truncate text-[11px] text-admin-muted">{adminUser?.email || ''}</div>
             </div>
           </div>
           <button
             type="button"
             onClick={requestLogout}
             title="Sign Out"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 shrink-0"
+            className="admin-btn-ghost p-1.5 hover:text-rose-400"
           >
             <LogOut className="h-4 w-4" />
           </button>
         </div>
 
         <a
-          href="http://localhost:3000"
+          href={WEB_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-between rounded-xl bg-slate-900 px-3 py-2 text-[11px] font-semibold text-slate-300 hover:text-cyan-400 border border-slate-800"
+          className="flex items-center justify-between rounded-lg border border-admin-border bg-admin-surface2 px-3 py-2 text-xs font-medium text-slate-300 hover:border-admin-accent/40 hover:text-admin-accent"
         >
-          <span>Open Web Terminal</span>
+          <span>Open website</span>
           <ExternalLink className="h-3.5 w-3.5" />
         </a>
       </div>
@@ -205,20 +245,15 @@ function SidebarPanel({ onClose, showClose }) {
 export default function Sidebar({ mobileOpen = false, onClose }) {
   return (
     <>
-      <div className="hidden lg:flex h-screen sticky top-0 z-30">
+      <div className="sticky top-0 z-30 hidden h-screen lg:flex">
         <SidebarPanel />
       </div>
 
       {mobileOpen &&
         createPortal(
-          <div className="lg:hidden fixed inset-0 z-[9999]" role="dialog" aria-modal="true">
-            <button
-              type="button"
-              className="absolute inset-0 bg-black/75"
-              aria-label="Close menu"
-              onClick={onClose}
-            />
-            <div className="absolute left-0 top-0 bottom-0 h-full shadow-2xl">
+          <div className="fixed inset-0 z-[9999] lg:hidden" role="dialog" aria-modal="true">
+            <button type="button" className="absolute inset-0 bg-black/70" aria-label="Close menu" onClick={onClose} />
+            <div className="absolute bottom-0 left-0 top-0 h-full shadow-2xl">
               <SidebarPanel onClose={onClose} showClose />
             </div>
           </div>,

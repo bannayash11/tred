@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { SymbolMark } from '@/components/common/SymbolMark';
 import { CaretLeftIcon, CaretRightIcon, CheckIcon, MinusIcon, XIcon } from '@/assets/svg/icons';
 import { expiryDisplay } from '@/components/common/expiryDisplay';
@@ -9,6 +10,7 @@ import { useFlowFocus, type FocusState } from './flowFocus';
 import { buildUpText, ChangeText, DotMeter, signedText, Spark, toneOf, windowCandles } from './FlowParts';
 import { clockOf, compactUnits, levelText, type FlowLevel, type FlowStock, type MarketFlow } from './marketFlowModel';
 import { useBox } from './useBox';
+import { chartPath } from '../../../../lib/chartRoutes';
 
 interface FlowPopupProps {
   flow: MarketFlow;
@@ -34,6 +36,7 @@ const HIDE_DELAY_MS = 90;
  * close and step controls in the app's own icons.
  */
 export function FlowPopup({ flow, mode }: FlowPopupProps) {
+  const navigate = useNavigate();
   const focus = useFlowFocus();
   const [shown, setShownState] = useState<FocusState | null>(null);
   const shownRef = useRef<FocusState | null>(null);
@@ -129,8 +132,17 @@ export function FlowPopup({ flow, mode }: FlowPopupProps) {
         </section>
       )}
       {shown.pinned ? (
-        <footer className="mf-popup__foot">
+        <footer className="mf-popup__foot" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span>{pcrText(stock)}Levels from the {expiryDisplay(stock.expiry).label} expiry</span>
+          <button
+            type="button"
+            className="mf-popup__tool"
+            style={{ whiteSpace: 'nowrap', padding: '0.35rem 0.65rem' }}
+            onClick={() => navigate(chartPath(stock.symbol))}
+            title={`Open ${stock.symbol} TradingView chart`}
+          >
+            Full chart
+          </button>
         </footer>
       ) : (
         <p className="mf-popup__hint">Click to keep it open · {pcrText(stock)}levels from the {expiryDisplay(stock.expiry).label} expiry</p>

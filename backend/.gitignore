@@ -7,3 +7,5 @@ Archive.zip
 .DS_Store
 *.log
 data/
+uploads/*
+!uploads/.gitkeep

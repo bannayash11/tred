@@ -21,13 +21,15 @@ import {
   Lock,
   Server,
   Zap,
+  Smartphone,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { updateUser } from '../store/slices/authSlice';
 import { setPlans } from '../store/slices/contentSlice';
-import { fetchPublicPlans, updateByokCredentialsApi } from '../services/api';
+import { fetchPublicPlans, fetchUtrConfig, updateByokCredentialsApi } from '../services/api';
 import { toErrorText } from '../lib/apiError';
 import RazorpayCheckout from '../components/RazorpayCheckout';
+import UtrCheckout from '../components/UtrCheckout';
 import {
   BYOK_BROKERS,
   getByokBroker,
@@ -96,6 +98,11 @@ export default function MembershipCheckout() {
   const [formError, setFormError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [readyToPay, setReadyToPay] = useState(false);
+  /** razorpay | utr — user picks how to pay (default prefers UTR; Razorpay often admin-off) */
+  const [payMethod, setPayMethod] = useState('utr');
+  const [razorpayAvailable, setRazorpayAvailable] = useState(false);
+  const [utrAvailable, setUtrAvailable] = useState(false);
+  const [utrPendingDone, setUtrPendingDone] = useState(false);
   /** After BYOK payment: collect demat/broker API keys */
   const [awaitingByok, setAwaitingByok] = useState(() => mustConnectBroker);
   const [byokProvider, setByokProvider] = useState('upstox');
@@ -157,6 +164,32 @@ export default function MembershipCheckout() {
       payRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [readyToPay]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUtrConfig()
+      .then((res) => {
+        if (cancelled) return;
+        const rzOn = !!res?.razorpayEnabled;
+        const utrOn = !!(res?.utrEnabled || (res?.enabled && res?.configured && res?.upiId));
+        setRazorpayAvailable(rzOn);
+        setUtrAvailable(utrOn);
+        // Prefer UTR when available; else Razorpay if admin enabled it
+        if (utrOn) setPayMethod('utr');
+        else if (rzOn) setPayMethod('razorpay');
+        else setPayMethod('utr');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRazorpayAvailable(false);
+          setUtrAvailable(false);
+          setPayMethod('utr');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const plan = useMemo(
     () => (plans || []).find((p) => p.id === planId && p.enabled !== false) || null,
@@ -831,9 +864,11 @@ export default function MembershipCheckout() {
                     Ready to pay ₹{finalPrice.toLocaleString('en-IN')}
                   </h4>
                   <p className="text-xs text-emerald-700 dark:text-emerald-300/80">
-                    {isByok
-                      ? 'Pay now to activate membership — broker keys come next.'
-                      : 'UPI recommended for zero-fee, instant membership activation.'}
+                    {utrPendingDone
+                      ? 'UTR submitted — waiting for admin verification.'
+                      : isByok
+                        ? 'Choose how to pay — broker keys come after membership is active.'
+                        : 'Choose Razorpay (instant) or UPI UTR (manual verify).'}
                   </p>
                 </div>
                 <div className="text-right">
@@ -843,59 +878,154 @@ export default function MembershipCheckout() {
                 </div>
               </div>
 
+              {!utrPendingDone && (razorpayAvailable || utrAvailable) && (
+                <div className={`grid grid-cols-1 gap-2 ${razorpayAvailable && utrAvailable ? 'sm:grid-cols-2' : ''}`}>
+                  {razorpayAvailable ? (
+                    <button
+                      type="button"
+                      onClick={() => setPayMethod('razorpay')}
+                      className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
+                        payMethod === 'razorpay'
+                          ? 'border-emerald-500 bg-emerald-500/15 ring-1 ring-emerald-500/40'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500'
+                      }`}
+                    >
+                      <CreditCard className={`h-5 w-5 shrink-0 ${payMethod === 'razorpay' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
+                      <div>
+                        <p className="text-xs font-extrabold text-slate-900 dark:text-white">Razorpay</p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">UPI / Card / NetBanking · Instant</p>
+                      </div>
+                    </button>
+                  ) : null}
+                  {utrAvailable ? (
+                    <button
+                      type="button"
+                      onClick={() => setPayMethod('utr')}
+                      className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
+                        payMethod === 'utr'
+                          ? 'border-cyan-500 bg-cyan-500/15 ring-1 ring-cyan-500/40'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500'
+                      }`}
+                    >
+                      <Smartphone className={`h-5 w-5 shrink-0 ${payMethod === 'utr' ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-400'}`} />
+                      <div>
+                        <p className="text-xs font-extrabold text-slate-900 dark:text-white">UPI + UTR</p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">Pay to our UPI · Admin verifies</p>
+                      </div>
+                    </button>
+                  ) : null}
+                </div>
+              )}
+
+              {!utrPendingDone && !razorpayAvailable && !utrAvailable ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-800 dark:text-amber-200">
+                  No payment method is enabled right now. Please contact support or try again later.
+                </div>
+              ) : null}
+
               <div className="pt-1">
-                <RazorpayCheckout
-                  planId={plan.id}
-                  amount={plan.price}
-                  customerDetails={customerDetails}
-                  description={plan.name}
-                  buttonLabel={`Pay ₹${finalPrice.toLocaleString('en-IN')} with Razorpay`}
-                  onSuccess={({ user, membershipActivated, paymentVerified }) => {
-                    if (user) dispatch(updateUser(user));
-                    setFormError('');
-                    // Paid successfully — never send user back to "pay again"
-                    if (isByok) {
-                      setAwaitingByok(true);
-                      setReadyToPay(false);
-                      return;
-                    }
-                    if (membershipActivated || paymentVerified) {
-                      setSuccess(true);
-                      setTimeout(() => navigate('/terminal'), 1200);
-                    }
-                  }}
-                  onFailure={(err) => {
-                    // Ignore soft "membership not active yet" after a verified pay
-                    const raw = String(err?.userMessage || err?.message || err?.description || '');
-                    if (/payment (received|confirmed|verified)/i.test(raw) && /membership/i.test(raw)) {
+                {utrPendingDone ? (
+                  <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-900 dark:text-cyan-100 space-y-2">
+                    <p className="font-extrabold">Payment under review</p>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      We received your UTR. Once admin confirms the amount in bank/UPI, your membership
+                      will activate automatically. You can close this page.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/dashboard')}
+                      className="mt-1 text-xs font-bold text-cyan-700 dark:text-cyan-300 hover:underline"
+                    >
+                      Go to dashboard →
+                    </button>
+                  </div>
+                ) : payMethod === 'utr' && utrAvailable ? (
+                  <UtrCheckout
+                    planId={plan.id}
+                    amount={plan.price}
+                    customerDetails={customerDetails}
+                    buttonLabel={`Submit UTR · ₹${finalPrice.toLocaleString('en-IN')}`}
+                    onSuccess={({ user, membershipActivated, paymentVerified, autoApproved, pendingUtr }) => {
+                      if (user) dispatch(updateUser(user));
+                      setFormError('');
+                      if (autoApproved || membershipActivated || paymentVerified) {
+                        if (isByok) {
+                          setAwaitingByok(true);
+                          setReadyToPay(false);
+                          setUtrPendingDone(false);
+                          return;
+                        }
+                        setSuccess(true);
+                        setTimeout(() => navigate('/terminal'), 1200);
+                        return;
+                      }
+                      if (pendingUtr) setUtrPendingDone(true);
+                      else setUtrPendingDone(true);
+                    }}
+                    onFailure={(err) => {
+                      setFormError(
+                        toErrorText(
+                          err?.userMessage || err?.response?.data?.message || err?.message,
+                          'UTR submit failed. Check the reference and try again.'
+                        )
+                      );
+                    }}
+                  />
+                ) : payMethod === 'razorpay' && razorpayAvailable ? (
+                  <RazorpayCheckout
+                    planId={plan.id}
+                    amount={plan.price}
+                    customerDetails={customerDetails}
+                    description={plan.name}
+                    buttonLabel={`Pay ₹${finalPrice.toLocaleString('en-IN')} with Razorpay`}
+                    onSuccess={({ user, membershipActivated, paymentVerified }) => {
+                      if (user) dispatch(updateUser(user));
+                      setFormError('');
                       if (isByok) {
                         setAwaitingByok(true);
                         setReadyToPay(false);
-                        setFormError('');
                         return;
                       }
-                    }
-                    setFormError(
-                      toErrorText(
-                        err?.userMessage || err?.message || err?.description || err,
-                        'Payment failed. Please try again with UPI or another method.'
-                      )
-                    );
-                    setReadyToPay(false);
-                  }}
-                />
+                      if (membershipActivated || paymentVerified) {
+                        setSuccess(true);
+                        setTimeout(() => navigate('/terminal'), 1200);
+                      }
+                    }}
+                    onFailure={(err) => {
+                      const raw = String(err?.userMessage || err?.message || err?.description || '');
+                      if (/payment (received|confirmed|verified)/i.test(raw) && /membership/i.test(raw)) {
+                        if (isByok) {
+                          setAwaitingByok(true);
+                          setReadyToPay(false);
+                          setFormError('');
+                          return;
+                        }
+                      }
+                      setFormError(
+                        toErrorText(
+                          err?.userMessage || err?.message || err?.description || err,
+                          'Payment failed. Please try again with UPI or another method.'
+                        )
+                      );
+                      setReadyToPay(false);
+                    }}
+                  />
+                ) : null}
               </div>
 
               <div className="flex items-center justify-between pt-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => setReadyToPay(false)}
+                  onClick={() => {
+                    setReadyToPay(false);
+                    setUtrPendingDone(false);
+                  }}
                   className="font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition"
                 >
                   ← Edit personal details
                 </button>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                  SSL 256-Bit Encrypted
+                  {payMethod === 'utr' ? 'Manual UTR verification' : 'SSL 256-Bit Encrypted'}
                 </span>
               </div>
             </div>

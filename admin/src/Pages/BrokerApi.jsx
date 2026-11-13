@@ -2,22 +2,23 @@ import React, { useState } from 'react';
 import { KeyRound, ShieldAlert, CheckCircle2, Save } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { fieldBorderClass, firstError, isMaskedToken } from '../lib/formValidation';
+import PageHeader from '../components/ui/PageHeader';
+import Panel from '../components/ui/Panel';
 
 export default function BrokerApi() {
   const { adminUser, systemSettings, saveBroker, showToast } = useAdmin();
-
   const isSubAdmin = adminUser?.role === 'subadmin';
 
   const [provider, setProvider] = useState(systemSettings.brokerProvider || 'DHAN');
-  const [clientId, setClientId] = useState(systemSettings.dhanClientId || '1100293847');
-  const [token, setToken] = useState(systemSettings.dhanToken || '••••••••••••••••••••••••••••••••');
+  const [clientId, setClientId] = useState(systemSettings.dhanClientId || '');
+  const [token, setToken] = useState(systemSettings.dhanToken || '');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubAdmin) {
-      showToast('⚠️ Access Denied: Modifying Broker API credentials requires Super Admin role.');
+      showToast('Broker API is Super Admin only.');
       return;
     }
     const next = {};
@@ -42,10 +43,7 @@ export default function BrokerApi() {
         }
       });
     } catch (err) {
-      const msg =
-        err?.userMessage ||
-        err?.response?.data?.message ||
-        'Could not save broker credentials. Check the values and try again.';
+      const msg = err?.userMessage || err?.response?.data?.message || 'Could not save broker credentials.';
       setErrors({ token: msg });
       showToast(msg);
     } finally {
@@ -55,59 +53,51 @@ export default function BrokerApi() {
 
   if (isSubAdmin) {
     return (
-      <div className="rounded-3xl border border-rose-900/60 bg-rose-950/20 p-8 text-center space-y-4">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-950 border border-rose-800 text-rose-400">
+      <Panel className="space-y-3 border-rose-800/50 bg-rose-950/20 p-8 text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-rose-800 bg-rose-950 text-rose-300">
           <ShieldAlert className="h-6 w-6" />
         </div>
-        <h3 className="text-lg font-bold text-white">Access Restricted: Super Admin Only</h3>
-        <p className="text-xs text-slate-400 max-w-md mx-auto">
-          Broker API credentials, WebSocket data stream keys, and institutional data connectors can only be accessed or modified by Super Administrators.
+        <h3 className="text-lg font-semibold text-white">Super Admin only</h3>
+        <p className="mx-auto max-w-md text-sm text-admin-muted">
+          Broker API credentials can only be viewed or changed by Super Administrators.
         </p>
-      </div>
+      </Panel>
     );
   }
 
   return (
-    <div className="max-w-3xl space-y-8">
-      <div>
-        <h2 className="text-xl font-extrabold text-white flex items-center">
-          <KeyRound className="mr-2 h-5 w-5 text-amber-400" />
-          Zero-Cost Broker API Feed Configuration
-        </h2>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Connect official Indian broker data APIs (DhanHQ / Fyers v3) to power sub-second candle streams with ₹0 monthly data fees.
-        </p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        title="Broker API"
+        description="Connect market data provider credentials for the live feed."
+        icon={KeyRound}
+      />
 
-      <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 sm:p-8 space-y-6 shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-white">Selected Market Data Provider</h3>
-            <p className="text-xs text-slate-400">Choose which live WebSocket bridge to bind to the SMC Engine.</p>
+      <Panel className="space-y-6 p-5 sm:p-6">
+        <div className="flex items-center justify-between border-b border-admin-border pb-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white">Data provider</h3>
+            <p className="mt-1 text-xs text-admin-muted">Bind a live WebSocket feed to the SMC engine.</p>
           </div>
-          <span className="rounded-full bg-emerald-950 px-3 py-1 text-xs font-bold text-emerald-400 border border-emerald-800/60 flex items-center space-x-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>CONNECTED</span>
+          <span className="admin-chip border-emerald-800/50 bg-emerald-950/50 text-emerald-300">
+            <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Connected
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs" noValidate>
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div>
-            <label className="text-slate-400 block mb-1">Broker API Engine</label>
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="w-full rounded-xl bg-slate-950 p-3 text-white border border-slate-800"
-            >
-              <option value="DHAN">DhanHQ API (Free 1-Minute Historical + Live WebSockets)</option>
-              <option value="FYERS">Fyers API v3 (Free Real-time Data for Demat Holders)</option>
-              <option value="OFFLINE_SIM">Offline High-Frequency Market Simulator (Fallback)</option>
+            <label className="admin-label">Provider</label>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="admin-input">
+              <option value="DHAN">DhanHQ</option>
+              <option value="FYERS">Fyers API v3</option>
+              <option value="OFFLINE_SIM">Offline simulator</option>
             </select>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="text-slate-400 block mb-1">Client ID / App Key</label>
+              <label className="admin-label">Client ID / App Key</label>
               <input
                 type="text"
                 required
@@ -116,15 +106,12 @@ export default function BrokerApi() {
                   setClientId(e.target.value);
                   setErrors({});
                 }}
-                className={`w-full rounded-xl bg-slate-950 p-3 text-white border font-mono ${fieldBorderClass(!!errors.clientId)}`}
+                className={`admin-input font-mono border ${fieldBorderClass(!!errors.clientId)}`}
               />
-              {errors.clientId && (
-                <p className="mt-1.5 text-[11px] font-medium text-rose-400">{errors.clientId}</p>
-              )}
+              {errors.clientId && <p className="mt-1.5 text-xs text-rose-400">{errors.clientId}</p>}
             </div>
-
             <div>
-              <label className="text-slate-400 block mb-1">Access Token / Secret JWT</label>
+              <label className="admin-label">Access token</label>
               <input
                 type="password"
                 required
@@ -133,34 +120,26 @@ export default function BrokerApi() {
                   setToken(e.target.value);
                   setErrors({});
                 }}
-                className={`w-full rounded-xl bg-slate-950 p-3 text-white border font-mono ${fieldBorderClass(!!errors.token)}`}
+                className={`admin-input font-mono border ${fieldBorderClass(!!errors.token)}`}
               />
-              {errors.token && (
-                <p className="mt-1.5 text-[11px] font-medium text-rose-400">{errors.token}</p>
-              )}
+              {errors.token && <p className="mt-1.5 text-xs text-rose-400">{errors.token}</p>}
             </div>
           </div>
 
-          <div className="rounded-2xl bg-slate-950/60 p-4 border border-slate-800/80 space-y-2 text-xs text-slate-400">
-            <div className="font-bold text-white flex items-center space-x-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span>Free Data Strategy Active</span>
+          <div className="rounded-lg border border-admin-border bg-admin-bg/60 p-4 text-sm text-admin-muted">
+            <div className="mb-1 flex items-center gap-1.5 font-semibold text-white">
+              <CheckCircle2 className="h-4 w-4 text-admin-success" />
+              Tip
             </div>
-            <p>
-              Both DhanHQ and Fyers provide 100% free historical candles and WebSockets with zero monthly recurring exchange fees for Demat holders.
-            </p>
+            Use broker API keys from your Demat account. Avoid sharing tokens outside Super Admin.
           </div>
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-3 font-bold text-black hover:opacity-95 shadow-md shadow-amber-500/20 flex items-center space-x-2"
-          >
+          <button type="submit" disabled={saving} className="admin-btn-primary">
             <Save className="h-4 w-4" />
-            <span>{saving ? 'Testing & Saving...' : 'Save & Bind Broker Credentials'}</span>
+            {saving ? 'Saving...' : 'Save credentials'}
           </button>
         </form>
-      </div>
+      </Panel>
     </div>
   );
 }

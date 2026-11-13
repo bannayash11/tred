@@ -133,6 +133,21 @@ export const DEFAULT_PLANS = [
     sortOrder: 8,
     description: 'Platform feed · full year membership',
     ...FEATURE_DEFAULTS
+  },
+  // ── ₹1 test / promo (admin can disable via Plans → eye toggle) ───────────
+  {
+    id: 'server_1rs',
+    name: '1 Month · ₹1 Test',
+    originalPrice: 350,
+    price: 1,
+    durationMonths: 1,
+    badge: '₹1 Test',
+    mode: 'server',
+    featured: false,
+    enabled: true,
+    sortOrder: 99,
+    description: 'Platform feed · ₹1 test membership (hide anytime from admin)',
+    ...FEATURE_DEFAULTS
   }
 ];
 
@@ -213,6 +228,38 @@ let byokSalesEnabled = true;
  */
 let freeTrialEnabled = false;
 let freeTrialDays = 14;
+
+/**
+ * Checkout payment methods — admin toggles.
+ * Razorpay DEFAULT OFF (manual UTR preferred until admin enables gateway).
+ * UTR auto-approve DEFAULT OFF — when ON, membership activates as soon as user submits UTR.
+ */
+let razorpayPaymentsEnabled = false;
+let utrPaymentsEnabled = true;
+let utrAutoApproveEnabled = false;
+
+/** UTR / UPI checkout details — admin-editable (env used as initial fallback). */
+let utrPayDetails = {
+  upiId: '',
+  payeeName: 'Tradrift',
+  qrImageUrl: '',
+  instructions:
+    'Pay the exact plan amount via UPI, then paste the UTR / UPI reference number below.'
+};
+
+function envUtrPayDefaults() {
+  return {
+    upiId: String(process.env.UTR_UPI_ID || '').trim(),
+    payeeName: String(
+      process.env.UTR_PAYEE_NAME || process.env.UTR_UPI_NAME || 'Tradrift'
+    ).trim() || 'Tradrift',
+    qrImageUrl: String(process.env.UTR_QR_IMAGE_URL || '').trim(),
+    instructions: String(
+      process.env.UTR_INSTRUCTIONS ||
+        'Pay the exact plan amount via UPI, then paste the UTR / UPI reference number below.'
+    ).trim()
+  };
+}
 
 export function getPlans() {
   return inMemoryPlans;
@@ -321,6 +368,135 @@ export async function persistFreeTrialSettings() {
   );
 }
 
+export function getRazorpayPaymentsEnabled() {
+  return razorpayPaymentsEnabled;
+}
+
+export function getUtrPaymentsEnabled() {
+  return utrPaymentsEnabled;
+}
+
+export function getUtrAutoApproveEnabled() {
+  return utrAutoApproveEnabled;
+}
+
+export function getPaymentMethodsSettings() {
+  return {
+    razorpayEnabled: razorpayPaymentsEnabled,
+    utrEnabled: utrPaymentsEnabled,
+    utrAutoApprove: utrAutoApproveEnabled
+  };
+}
+
+export function setPaymentMethodsSettings({ razorpayEnabled, utrEnabled, utrAutoApprove } = {}) {
+  if (razorpayEnabled !== undefined) razorpayPaymentsEnabled = !!razorpayEnabled;
+  if (utrEnabled !== undefined) utrPaymentsEnabled = !!utrEnabled;
+  if (utrAutoApprove !== undefined) utrAutoApproveEnabled = !!utrAutoApprove;
+  return getPaymentMethodsSettings();
+}
+
+export function getUtrPayDetails() {
+  const env = envUtrPayDefaults();
+  return {
+    upiId: utrPayDetails.upiId || env.upiId,
+    payeeName: utrPayDetails.payeeName || env.payeeName || 'Tradrift',
+    qrImageUrl: utrPayDetails.qrImageUrl || env.qrImageUrl,
+    instructions: utrPayDetails.instructions || env.instructions
+  };
+}
+
+export function setUtrPayDetails({ upiId, payeeName, qrImageUrl, instructions } = {}) {
+  if (upiId !== undefined) utrPayDetails.upiId = String(upiId || '').trim();
+  if (payeeName !== undefined) {
+    utrPayDetails.payeeName = String(payeeName || '').trim() || 'Tradrift';
+  }
+  if (qrImageUrl !== undefined) utrPayDetails.qrImageUrl = String(qrImageUrl || '').trim();
+  if (instructions !== undefined) {
+    utrPayDetails.instructions = String(instructions || '').trim();
+  }
+  return getUtrPayDetails();
+}
+
+export async function loadUtrPayDetailsFromDb() {
+  try {
+    const env = envUtrPayDefaults();
+    // Seed from env first so empty DB still works
+    utrPayDetails = {
+      upiId: env.upiId,
+      payeeName: env.payeeName,
+      qrImageUrl: env.qrImageUrl,
+      instructions: env.instructions
+    };
+    const doc = await Settings.findOne({ key: 'utr_pay_config' });
+    if (doc?.value && typeof doc.value === 'object') {
+      if (typeof doc.value.upiId === 'string') utrPayDetails.upiId = doc.value.upiId.trim();
+      if (typeof doc.value.payeeName === 'string' && doc.value.payeeName.trim()) {
+        utrPayDetails.payeeName = doc.value.payeeName.trim();
+      }
+      if (typeof doc.value.qrImageUrl === 'string') {
+        utrPayDetails.qrImageUrl = doc.value.qrImageUrl.trim();
+      }
+      if (typeof doc.value.instructions === 'string' && doc.value.instructions.trim()) {
+        utrPayDetails.instructions = doc.value.instructions.trim();
+      }
+    }
+  } catch {
+    /* keep env defaults */
+  }
+}
+
+export async function persistUtrPayDetails() {
+  await Settings.findOneAndUpdate(
+    { key: 'utr_pay_config' },
+    {
+      key: 'utr_pay_config',
+      value: {
+        upiId: utrPayDetails.upiId,
+        payeeName: utrPayDetails.payeeName,
+        qrImageUrl: utrPayDetails.qrImageUrl,
+        instructions: utrPayDetails.instructions
+      },
+      updatedAt: new Date()
+    },
+    { upsert: true, new: true }
+  );
+}
+
+export async function loadPaymentMethodsSettingsFromDb() {
+  try {
+    const doc = await Settings.findOne({ key: 'payment_methods_platform' });
+    if (doc?.value) {
+      if (typeof doc.value.razorpayEnabled === 'boolean') {
+        razorpayPaymentsEnabled = doc.value.razorpayEnabled;
+      }
+      if (typeof doc.value.utrEnabled === 'boolean') {
+        utrPaymentsEnabled = doc.value.utrEnabled;
+      }
+      if (typeof doc.value.utrAutoApprove === 'boolean') {
+        utrAutoApproveEnabled = doc.value.utrAutoApprove;
+      }
+    }
+  } catch {
+    /* keep defaults (Razorpay OFF, UTR ON, auto-approve OFF) */
+  }
+}
+
+export async function persistPaymentMethodsSettings() {
+  await Settings.findOneAndUpdate(
+    { key: 'payment_methods_platform' },
+    {
+      key: 'payment_methods_platform',
+      value: {
+        razorpayEnabled: razorpayPaymentsEnabled,
+        utrEnabled: utrPaymentsEnabled,
+        utrAutoApprove: utrAutoApproveEnabled
+      },
+      updatedAt: new Date()
+    },
+    { upsert: true, new: true }
+  );
+}
+
 function withOfferDefaults(plan) {
   let normalized = normalizePlan(plan);
   const canon = CANONICAL_PLAN_NAMES[normalized.id];
@@ -366,15 +542,23 @@ export async function loadPlansFromDb() {
         // Mark legacy plans as server-hosted
         loaded = loaded.map((p) => normalizePlan({ ...p, mode: p.mode || 'server' }));
         loaded = [...byokDefaults, ...loaded];
-        inMemoryPlans = loaded;
-        try {
-          await persistPlans();
-        } catch {
-          /* keep memory */
-        }
-      } else {
-        const needsPersist = loaded.some((p, i) => {
+      }
+
+      // Inject any new default plan ids (e.g. ₹1 test) missing from persisted catalog
+      const existingIds = new Set(loaded.map((p) => p.id));
+      const missingDefaults = DEFAULT_PLANS.filter((p) => !existingIds.has(p.id)).map((p) =>
+        normalizePlan(p)
+      );
+      if (missingDefaults.length) {
+        loaded = [...loaded, ...missingDefaults];
+      }
+
+      const needsPersist =
+        missingDefaults.length > 0 ||
+        !hasByok ||
+        loaded.some((p, i) => {
           const raw = doc.value[i];
+          if (!raw) return false;
           const priceBackfill = !raw?.originalPrice && p.originalPrice > p.price;
           const nameBackfill =
             /^Server\s*·/i.test(String(raw?.name || '')) ||
@@ -383,13 +567,13 @@ export async function loadPlansFromDb() {
             /^Own Keys\s*·/i.test(String(raw?.name || ''));
           return priceBackfill || nameBackfill;
         });
-        inMemoryPlans = loaded;
-        if (needsPersist) {
-          try {
-            await persistPlans();
-          } catch {
-            /* keep memory */
-          }
+
+      inMemoryPlans = loaded;
+      if (needsPersist) {
+        try {
+          await persistPlans();
+        } catch {
+          /* keep memory */
         }
       }
     }

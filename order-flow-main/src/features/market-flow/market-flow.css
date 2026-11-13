@@ -491,7 +491,7 @@
 .mf-dg__lit .is-dash { stroke: #ffffff; stroke-width: 1.5; stroke-dasharray: 6 5; opacity: 0.95; animation: mf-lit-flow 0.8s linear infinite; filter: drop-shadow(0 0 4px #ffffff); }
 @keyframes mf-lit-flow { to { stroke-dashoffset: -22; } }
 
-/* ── Motion (owner, 26 Oct 2026: OrderBlock's life, in the app's colours) ──
+/* ── Motion (owner, 26 Oct 2026: Tradrift's life, in the app's colours) ──
    Each effect is slow and small, so the board breathes rather than flickers;
    all of it stops under prefers-reduced-motion (below). */
 /* The lead paths draw in once, one after another. */
@@ -650,7 +650,7 @@
 .mf-tall__spot { stroke: var(--text); stroke-width: 1; stroke-dasharray: 2 2; }
 .mf-tall__tag { fill: var(--text); }
 .mf-tall__tagtext { font-size: 10px; font-weight: 700; fill: var(--surface-raised); font-variant-numeric: tabular-nums; }
-/* Lit or hovered, a card glows in its own direction's colour (OrderBlock's
+/* Lit or hovered, a card glows in its own direction's colour (Tradrift's
    neon, in the app's green and red), so the eye lands on it without a white ring. */
 .mf-tall.is-lit, .mf-tall:hover,
 .mf-dgcard.is-lit, .mf-dgcard:hover { box-shadow: 0 0 0 1.5px var(--text); }
@@ -758,7 +758,7 @@
 .mf-tile.is-dg .mf-tile__bu { font-size: 10px; }
 
 /* ═══ THE STAGE (owner, 26 Oct 2026) ═══════════════════════════════════
-   Compared side by side with OrderBlock's board: it reads as a lit
+   Compared side by side with Tradrift's board: it reads as a lit
    instrument, ours read as a page. The difference is the stage, not the data:
    - the board is ALWAYS a dark stage, in either site theme (the app's own dark
      palette, so the look is ours);

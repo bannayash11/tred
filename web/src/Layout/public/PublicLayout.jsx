@@ -18,6 +18,7 @@ import {
 import { updateUser, logout, loginSuccess } from '../../store/slices/authSlice';
 import { setScreenerData, setMarketXRay } from '../../store/slices/screenerSlice';
 import { setPlans } from '../../store/slices/contentSlice';
+import { chartLoginPath, chartPath } from '../../lib/chartRoutes';
 
 export default function PublicLayout() {
   const dispatch = useDispatch();
@@ -222,12 +223,12 @@ export default function PublicLayout() {
 
   const openStockChart = (sym) => {
     if (!sym) return;
-    const code = String(sym).toUpperCase();
+    // Home, Terminal, Momentum, X-Ray, ticker — same encoded path everywhere
     if (!isAuthenticated) {
-      navigate(`/login?next=${encodeURIComponent(`/chart/${code}`)}`);
+      navigate(chartLoginPath(sym));
       return;
     }
-    navigate(`/chart/${code}`);
+    navigate(chartPath(sym));
   };
 
   return (

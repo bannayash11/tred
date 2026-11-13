@@ -146,7 +146,7 @@ export default function Login({ mode = 'login' }) {
   const [showForgot, setShowForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [recoveryStep, setRecoveryStep] = useState(1);
-  const [recoveryCode, setRecoveryCode] = useState('0000');
+  const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [recoveryNotice, setRecoveryNotice] = useState('');
   const [recoveryError, setRecoveryError] = useState('');
@@ -214,7 +214,7 @@ export default function Login({ mode = 'login' }) {
   const openForgot = () => {
     setForgotEmail(String(email || '').trim().toLowerCase());
     setRecoveryStep(1);
-    setRecoveryCode('0000');
+    setRecoveryCode('');
     setNewPassword('');
     setRecoveryNotice('');
     setRecoveryError('');
@@ -234,8 +234,8 @@ export default function Login({ mode = 'login' }) {
     try {
       const res = await forgotPasswordApi({ email: normalized });
       if (res.success) {
-        setRecoveryNotice(res.message || 'Use OTP 0000 to reset your password.');
-        setRecoveryCode(res.otp || '0000');
+        setRecoveryNotice(res.message || 'If that account exists, an OTP was emailed.');
+        if (res.otp) setRecoveryCode(res.otp);
         setRecoveryStep(2);
       } else {
         setRecoveryError(res.message || 'Could not start recovery.');
@@ -251,7 +251,7 @@ export default function Login({ mode = 'login' }) {
     e.preventDefault();
     setRecoveryError('');
     if (!String(recoveryCode || '').trim()) {
-      setRecoveryError('Please enter OTP 0000.');
+      setRecoveryError('Please enter the 6-digit OTP from your email.');
       return;
     }
     if (!newPassword || newPassword.length < 6) {
@@ -299,8 +299,8 @@ export default function Login({ mode = 'login' }) {
       }
 
       if (isRegister && requiresSignupOtp) {
-        if (!/^\d{4}$/.test(String(otpCode || '').trim())) {
-          applyAuthMessage('Enter the 4-digit email OTP (0000).', 'otp');
+        if (!/^\d{6}$/.test(String(otpCode || '').trim())) {
+          applyAuthMessage('Enter the 6-digit OTP sent to your email.', 'otp');
           return;
         }
         const normalizedEmail = String(email || '').trim().toLowerCase();
@@ -346,7 +346,7 @@ export default function Login({ mode = 'login' }) {
 
         const otpRes = await registerSendOtpApi({ email: normalizedEmail });
         if (otpRes.success) {
-          setOtpCode(otpRes.otp || '0000');
+          setOtpCode(otpRes.otp || '');
           setRequiresSignupOtp(true);
           clearFormErrors();
           return;
@@ -674,7 +674,7 @@ export default function Login({ mode = 'login' }) {
             </h2>
             <p className="text-sm text-slate-400">
               {requiresSignupOtp
-                ? 'Enter the OTP sent to your email to finish signup. Default OTP is 0000 for now.'
+                ? 'Enter the 6-digit OTP emailed to you to finish signup.'
                 : isRegister
                   ? freeTrialEnabled
                     ? `Start a ${freeTrialDays}-day institutional trial. Available only for users aged 18 and above.`
@@ -701,11 +701,11 @@ export default function Login({ mode = 'login' }) {
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     required
-                    maxLength={4}
-                    placeholder="0000"
+                    maxLength={6}
+                    placeholder="6-digit OTP"
                     value={otpCode}
                     onChange={(e) => {
-                      setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 4));
+                      setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
                       if (fieldErrors.otp) clearFormErrors();
                     }}
                     className={`w-full rounded-xl bg-slate-950/80 py-3 pl-10 pr-3 text-sm text-white border focus:ring-1 focus:outline-none transition-colors tracking-widest ${inputBorder('otp')}`}
@@ -713,7 +713,7 @@ export default function Login({ mode = 'login' }) {
                 </div>
                 {fieldHint('otp')}
                 <p className="mt-1.5 text-[10px] text-slate-500">
-                  Default OTP for now: <span className="font-mono text-cyan-400">0000</span>
+                  Check your inbox (and spam) for the Tradrift OTP email.
                 </p>
                 <button
                   type="button"
@@ -969,7 +969,7 @@ export default function Login({ mode = 'login' }) {
               Reset Password
             </h3>
             <p className="text-slate-400">
-              Enter your account email, then use OTP <span className="font-mono text-cyan-400">0000</span> to set a new password.
+              Enter your account email. We will send a 6-digit OTP to reset your password.
             </p>
 
             {recoveryNotice && (
@@ -1024,14 +1024,14 @@ export default function Login({ mode = 'login' }) {
                     type="text"
                     inputMode="numeric"
                     required
-                    maxLength={4}
-                    placeholder="0000"
+                    maxLength={6}
+                    placeholder="6-digit OTP"
                     value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     className="w-full rounded-xl bg-slate-950 p-2.5 font-mono text-white border border-slate-800 text-center tracking-widest text-sm"
                   />
                   <p className="mt-1.5 text-[10px] text-slate-500">
-                    Default OTP: <span className="font-mono text-cyan-400">0000</span>
+                    Enter the OTP from your email.
                   </p>
                 </div>
                 <div>

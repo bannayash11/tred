@@ -2,7 +2,14 @@ import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import { Payment } from '../models/Payment.js';
 import { User } from '../models/User.js';
-import { findPlanById, getByokSalesEnabled } from '../services/membershipPlans.js';
+import {
+  findPlanById,
+  getByokSalesEnabled,
+  getRazorpayPaymentsEnabled,
+  getUtrPaymentsEnabled,
+  getUtrAutoApproveEnabled,
+  getUtrPayDetails
+} from '../services/membershipPlans.js';
 import { connectByok } from '../services/byokSessionService.js';
 import { encryptObject, decryptObject } from '../utils/cryptoSecrets.js';
 import { activateMembershipForUser, sanitizeUser } from '../services/membershipActivation.js';
@@ -18,6 +25,137 @@ function toPublicPayment(doc) {
   delete p.signature;
   delete p.__v;
   return p;
+}
+
+function envUtrFlagOn() {
+  const raw = String(process.env.UTR_PAYMENTS_ENABLED ?? '1').trim().toLowerCase();
+  return !['0', 'false', 'off', 'no'].includes(raw);
+}
+
+function getUtrPayConfig() {
+  const details = getUtrPayDetails();
+  const upiId = String(details.upiId || '').trim();
+  const adminUtrOn = getUtrPaymentsEnabled() && envUtrFlagOn();
+  return {
+    enabled: adminUtrOn,
+    upiId,
+    payeeName: String(details.payeeName || 'Tradrift').trim(),
+    qrImageUrl: String(details.qrImageUrl || '').trim(),
+    instructions: String(
+      details.instructions ||
+        'Pay the exact plan amount via UPI, then paste the UTR / UPI reference number below.'
+    ).trim(),
+    razorpayEnabled: getRazorpayPaymentsEnabled(),
+    utrEnabled: adminUtrOn && !!upiId
+  };
+}
+
+function normalizeUtr(raw) {
+  return String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s\-]/g, '');
+}
+
+function isValidUtr(utr) {
+  // UPI / IMPS / NEFT refs are typically 12–22 alphanumeric chars
+  return /^[A-Z0-9]{8,30}$/.test(utr);
+}
+
+function makeUtrOrderId() {
+  return `utr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
+/**
+ * Shared membership checkout guards (Razorpay + UTR).
+ */
+async function resolveMembershipCheckoutContext(req) {
+  if (!req.user) {
+    const err = new Error('Sign in required before purchasing a membership.');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const planId = String(req.body?.planId || '').trim();
+  if (!planId) {
+    const err = new Error('planId is required. Membership activates only after paid checkout.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const plan = findPlanById(planId);
+  if (!plan || plan.enabled === false) {
+    const err = new Error('Membership plan not found or disabled.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const mode = plan.mode === 'byok' ? 'byok' : 'server';
+  if (mode === 'byok' && !getByokSalesEnabled()) {
+    const alreadyByok =
+      req.user?.subscription?.byokGranted || req.user?.subscription?.mode === 'byok';
+    if (!alreadyByok) {
+      const err = new Error('BYOK membership sales are currently disabled by admin.');
+      err.statusCode = 403;
+      throw err;
+    }
+  }
+
+  const amountInr = Number(plan.price);
+  if (!Number.isFinite(amountInr) || amountInr < 1) {
+    const err = new Error('Plan price is invalid. Contact support.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (req.body?.amount != null && Number(req.body.amount) !== amountInr) {
+    const err = new Error('Amount mismatch. Refresh pricing and try again.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const customerDetails = normalizeCustomerDetails(
+    req.body?.customerDetails || {
+      name: req.user.name,
+      email: req.user.email,
+      phone: req.body?.customerDetails?.phone || ''
+    }
+  );
+
+  if (!customerDetails.name || !customerDetails.email) {
+    const err = new Error('customerDetails.name and customerDetails.email are required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  let pendingByokCipher = null;
+  if (mode === 'byok') {
+    const creds = req.body?.byokCredentials;
+    if (creds && typeof creds === 'object') {
+      try {
+        const connected = await connectByok(creds);
+        pendingByokCipher = encryptObject(connected.bundle);
+      } catch (err) {
+        const msg = String(err?.message || '').trim();
+        const e = new Error(
+          msg && msg !== '[object Object]'
+            ? msg
+            : 'Could not validate BYOK broker credentials. Check keys and try again.'
+        );
+        e.statusCode = err.statusCode || 400;
+        throw e;
+      }
+    }
+  }
+
+  return {
+    plan,
+    mode,
+    amountInr,
+    customerDetails,
+    pendingByokCipher,
+    userId: req.user._id || req.user.id
+  };
 }
 
 function assertPaymentOwnership(payment, reqUser) {
@@ -101,98 +239,47 @@ async function activateMembershipFromPayment(paymentDoc, { byokCredentials = nul
 }
 
 /**
+ * GET /api/payment/utr-config
+ * Public checkout config for manual UPI / UTR payments.
+ */
+export const getUtrConfig = async (_req, res) => {
+  try {
+    const config = getUtrPayConfig();
+    const configured = !!(config.enabled && config.upiId);
+    return res.json({
+      success: true,
+      ...config,
+      configured,
+      // Checkout picker uses these
+      razorpayEnabled: !!config.razorpayEnabled,
+      utrEnabled: configured
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to load UTR payment config.'
+    });
+  }
+};
+
+/**
  * POST /api/payment/create-order
  * Membership purchases require auth + planId. Amount is taken from the plan (server-side).
  */
 export const createOrder = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({
+    if (!getRazorpayPaymentsEnabled()) {
+      return res.status(403).json({
         success: false,
-        message: 'Sign in required before purchasing a membership.'
+        message: 'Razorpay checkout is currently disabled by admin. Use UPI + UTR or contact support.'
       });
     }
 
-    const planId = String(req.body?.planId || '').trim();
-    if (!planId) {
-      return res.status(400).json({
-        success: false,
-        message: 'planId is required. Membership activates only after paid checkout.'
-      });
-    }
-
-    const plan = findPlanById(planId);
-    if (!plan || plan.enabled === false) {
-      return res.status(404).json({ success: false, message: 'Membership plan not found or disabled.' });
-    }
-
-    const mode = plan.mode === 'byok' ? 'byok' : 'server';
-    if (mode === 'byok' && !getByokSalesEnabled()) {
-      const alreadyByok =
-        req.user?.subscription?.byokGranted || req.user?.subscription?.mode === 'byok';
-      if (!alreadyByok) {
-        return res.status(403).json({
-          success: false,
-          message: 'BYOK membership sales are currently disabled by admin.'
-        });
-      }
-    }
-
-    const amountInr = Number(plan.price);
-    if (!Number.isFinite(amountInr) || amountInr < 1) {
-      return res.status(400).json({
-        success: false,
-        message: 'Plan price is invalid. Contact support.'
-      });
-    }
-
-    // Client may send amount for display check — reject mismatches
-    if (req.body?.amount != null && Number(req.body.amount) !== amountInr) {
-      return res.status(400).json({
-        success: false,
-        message: 'Amount mismatch. Refresh pricing and try again.'
-      });
-    }
-
-    const customerDetails = normalizeCustomerDetails(
-      req.body?.customerDetails || {
-        name: req.user.name,
-        email: req.user.email,
-        phone: req.body?.customerDetails?.phone || ''
-      }
-    );
-
-    if (!customerDetails.name || !customerDetails.email) {
-      return res.status(400).json({
-        success: false,
-        message: 'customerDetails.name and customerDetails.email are required.'
-      });
-    }
-
-    // BYOK keys are optional at order time — preferred flow is: pay → then connect broker.
-    let pendingByokCipher = null;
-    if (mode === 'byok') {
-      const creds = req.body?.byokCredentials;
-      if (creds && typeof creds === 'object') {
-        try {
-          const connected = await connectByok(creds);
-          pendingByokCipher = encryptObject(connected.bundle);
-        } catch (err) {
-          const msg = String(err?.message || '').trim();
-          return res.status(err.statusCode || 400).json({
-            success: false,
-            message:
-              msg && msg !== '[object Object]'
-                ? msg
-                : 'Could not validate BYOK broker credentials. Check keys and try again.'
-          });
-        }
-      }
-    }
+    const { plan, amountInr, customerDetails, pendingByokCipher, userId } =
+      await resolveMembershipCheckoutContext(req);
 
     const razorpay = getRazorpayClient();
     const amountPaise = Math.round(amountInr * 100);
-    const userId = req.user._id || req.user.id;
 
     const order = await razorpay.orders.create({
       amount: amountPaise,
@@ -215,6 +302,7 @@ export const createOrder = async (req, res) => {
       amount: amountInr,
       currency: order.currency || 'INR',
       status: 'created',
+      gateway: 'razorpay',
       planId: plan.id,
       planName: plan.name,
       membershipActivated: false,
@@ -228,14 +316,277 @@ export const createOrder = async (req, res) => {
       currency: paymentDoc.currency,
       planId: paymentDoc.planId,
       planName: paymentDoc.planName,
+      gateway: 'razorpay',
       keyId: process.env.RAZORPAY_KEY_ID,
       paymentRecordId: paymentDoc._id
     });
   } catch (err) {
     console.error('[Payment] create-order error:', err);
-    return res.status(500).json({
+    return res.status(err.statusCode || 500).json({
       success: false,
       message: err.message || 'Failed to create payment order.'
+    });
+  }
+};
+
+/**
+ * POST /api/payment/utr/submit
+ * User paid via UPI/bank outside Razorpay — submit UTR for admin verification.
+ */
+export const submitUtrPayment = async (req, res) => {
+  try {
+    const config = getUtrPayConfig();
+    if (!config.enabled || !config.upiId) {
+      return res.status(403).json({
+        success: false,
+        message: 'UTR / manual UPI payments are currently disabled.'
+      });
+    }
+
+    const { plan, amountInr, customerDetails, pendingByokCipher, userId } =
+      await resolveMembershipCheckoutContext(req);
+
+    const utr = normalizeUtr(req.body?.utr);
+    if (!isValidUtr(utr)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Enter a valid UTR / UPI reference (8–30 letters or numbers).'
+      });
+    }
+
+    const existingUtr = await Payment.findOne({ utr });
+    if (existingUtr) {
+      return res.status(409).json({
+        success: false,
+        message:
+          existingUtr.status === 'paid'
+            ? 'This UTR is already used for a confirmed payment.'
+            : 'This UTR is already submitted. Wait for admin verification or contact support.'
+      });
+    }
+
+    // One open UTR request per user+plan at a time
+    const openPending = await Payment.findOne({
+      userId,
+      planId: plan.id,
+      gateway: 'utr',
+      status: 'pending'
+    });
+    if (openPending) {
+      return res.status(409).json({
+        success: false,
+        message:
+          'You already have a pending UTR payment for this plan. Wait for verification or contact support.',
+        payment: toPublicPayment(openPending)
+      });
+    }
+
+    const autoApprove = getUtrAutoApproveEnabled();
+
+    let paymentDoc = await Payment.create({
+      userId,
+      customerDetails,
+      orderId: makeUtrOrderId(),
+      amount: amountInr,
+      currency: 'INR',
+      status: autoApprove ? 'paid' : 'pending',
+      gateway: 'utr',
+      paymentMethod: 'upi',
+      utr,
+      planId: plan.id,
+      planName: plan.name,
+      membershipActivated: false,
+      adminNote: autoApprove ? 'Auto-approved on UTR submit' : null,
+      reviewedAt: autoApprove ? new Date() : null,
+      ...(pendingByokCipher ? { pendingByokCipher } : {})
+    });
+
+    if (autoApprove) {
+      paymentDoc = await Payment.findById(paymentDoc._id).select('+pendingByokCipher');
+      let activation;
+      try {
+        activation = await activateMembershipFromPayment(paymentDoc);
+      } catch (actErr) {
+        console.error('[Payment] UTR auto-approve activation failed:', actErr);
+        return res.status(201).json({
+          success: true,
+          paymentVerified: true,
+          membershipActivated: false,
+          autoApproved: true,
+          message:
+            actErr.message ||
+            'UTR auto-approved but membership activation failed. Contact support with your UTR.',
+          payment: toPublicPayment(paymentDoc),
+          orderId: paymentDoc.orderId,
+          status: 'paid',
+          user: null
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        paymentVerified: true,
+        membershipActivated: !!activation.activated,
+        autoApproved: true,
+        message: activation.activated
+          ? 'UTR received. Membership is now active.'
+          : 'UTR auto-approved.',
+        payment: toPublicPayment(paymentDoc),
+        orderId: paymentDoc.orderId,
+        status: 'paid',
+        user: activation.user || null
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      paymentVerified: false,
+      membershipActivated: false,
+      autoApproved: false,
+      message:
+        'UTR submitted. Membership activates after admin verifies your payment (usually within a few hours).',
+      payment: toPublicPayment(paymentDoc),
+      orderId: paymentDoc.orderId,
+      status: 'pending'
+    });
+  } catch (err) {
+    if (err?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'This UTR was just submitted by someone else. Contact support if this is your payment.'
+      });
+    }
+    console.error('[Payment] utr submit error:', err);
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message || 'Failed to submit UTR payment.'
+    });
+  }
+};
+
+/**
+ * POST /api/payment/admin/:id/approve-utr
+ */
+export const approveUtrPayment = async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Payment id is required.' });
+    }
+
+    const payment = await Payment.findById(id).select('+pendingByokCipher');
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found.' });
+    }
+    if (payment.gateway !== 'utr') {
+      return res.status(400).json({ success: false, message: 'Only UTR payments can be approved here.' });
+    }
+    if (payment.status === 'paid' && payment.membershipActivated) {
+      return res.json({
+        success: true,
+        message: 'Already approved and activated.',
+        payment: toPublicPayment(payment)
+      });
+    }
+    if (payment.status !== 'pending' && payment.status !== 'paid') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot approve payment in status "${payment.status}".`
+      });
+    }
+
+    const adminNote = String(req.body?.adminNote || '').trim().slice(0, 500);
+    payment.status = 'paid';
+    payment.paymentMethod = payment.paymentMethod || 'upi';
+    payment.failureReason = null;
+    payment.reviewedBy = req.user?._id || req.user?.id || null;
+    payment.reviewedAt = new Date();
+    if (adminNote) payment.adminNote = adminNote;
+    await payment.save();
+
+    let activation;
+    try {
+      activation = await activateMembershipFromPayment(payment);
+    } catch (actErr) {
+      console.error('[Payment] UTR approve activation failed:', actErr);
+      return res.status(actErr.statusCode || 500).json({
+        success: true,
+        paymentApproved: true,
+        membershipActivated: false,
+        message:
+          actErr.message ||
+          'UTR approved but membership activation failed. Retry or activate manually.',
+        payment: toPublicPayment(payment)
+      });
+    }
+
+    return res.json({
+      success: true,
+      paymentApproved: true,
+      membershipActivated: !!activation.activated,
+      message: activation.activated
+        ? 'UTR verified. Membership activated.'
+        : 'UTR marked paid.',
+      payment: toPublicPayment(payment),
+      user: activation.user || null
+    });
+  } catch (err) {
+    console.error('[Payment] approve-utr error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to approve UTR payment.'
+    });
+  }
+};
+
+/**
+ * POST /api/payment/admin/:id/reject-utr
+ */
+export const rejectUtrPayment = async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Payment id is required.' });
+    }
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found.' });
+    }
+    if (payment.gateway !== 'utr') {
+      return res.status(400).json({ success: false, message: 'Only UTR payments can be rejected here.' });
+    }
+    if (payment.status === 'paid' || payment.membershipActivated) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot reject a payment that is already paid / activated.'
+      });
+    }
+    if (payment.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot reject payment in status "${payment.status}".`
+      });
+    }
+
+    const reason = String(req.body?.reason || req.body?.adminNote || '').trim().slice(0, 500);
+    payment.status = 'failed';
+    payment.failureReason = reason || 'UTR rejected by admin';
+    payment.adminNote = reason || payment.adminNote;
+    payment.reviewedBy = req.user?._id || req.user?.id || null;
+    payment.reviewedAt = new Date();
+    await payment.save();
+
+    return res.json({
+      success: true,
+      message: 'UTR payment rejected.',
+      payment: toPublicPayment(payment)
+    });
+  } catch (err) {
+    console.error('[Payment] reject-utr error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to reject UTR payment.'
     });
   }
 };
@@ -526,13 +877,19 @@ export const handlePaymentWebhook = async (req, res) => {
 export const getAdminPayments = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const maxLimit = String(req.query.export || '') === '1' ? 5000 : 100;
+    const limit = Math.min(maxLimit, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
 
     const filter = {};
     const status = String(req.query.status || '').trim().toLowerCase();
-    if (status && ['created', 'paid', 'failed'].includes(status)) {
+    if (status && ['created', 'pending', 'paid', 'failed'].includes(status)) {
       filter.status = status;
+    }
+
+    const gateway = String(req.query.gateway || '').trim().toLowerCase();
+    if (gateway && ['razorpay', 'utr'].includes(gateway)) {
+      filter.gateway = gateway;
     }
 
     const search = String(req.query.search || '').trim();
@@ -542,6 +899,7 @@ export const getAdminPayments = async (req, res) => {
       filter.$or = [
         { orderId: rx },
         { paymentId: rx },
+        { utr: rx },
         { 'customerDetails.email': rx },
         { 'customerDetails.name': rx },
         { planId: rx },
@@ -571,7 +929,8 @@ export const getAdminPayments = async (req, res) => {
       totalRevenue: 0,
       totalSuccessCount: 0,
       totalFailedCount: 0,
-      totalPendingCount: 0
+      totalPendingCount: 0,
+      utrPendingCount: 0
     };
 
     for (const row of aggregates) {
@@ -580,8 +939,9 @@ export const getAdminPayments = async (req, res) => {
         summary.totalRevenue = row.revenue;
       } else if (row._id === 'failed') {
         summary.totalFailedCount = row.count;
-      } else if (row._id === 'created') {
-        summary.totalPendingCount = row.count;
+      } else if (row._id === 'created' || row._id === 'pending') {
+        summary.totalPendingCount += row.count;
+        if (row._id === 'pending') summary.utrPendingCount = row.count;
       }
     }
 
@@ -601,6 +961,99 @@ export const getAdminPayments = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: err.message || 'Failed to fetch payments.'
+    });
+  }
+};
+
+/**
+ * POST /api/payment/admin/import
+ * Bulk upsert payment rows from CSV/JSON import (matched by orderId).
+ */
+export const importAdminPayments = async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.payments) ? req.body.payments : [];
+    if (!rows.length) {
+      return res.status(400).json({ success: false, message: 'No payment rows to import.' });
+    }
+    if (rows.length > 2000) {
+      return res.status(400).json({ success: false, message: 'Import limit is 2000 rows per request.' });
+    }
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i] || {};
+      const orderId = String(row.orderId || '').trim();
+      const amount = Number(row.amount);
+      if (!orderId || !Number.isFinite(amount) || amount < 1) {
+        skipped += 1;
+        errors.push({ row: i + 1, message: 'orderId and amount (>=1) are required.' });
+        continue;
+      }
+
+      const statusRaw = String(row.status || 'created').trim().toLowerCase();
+      const status = ['created', 'pending', 'paid', 'failed'].includes(statusRaw) ? statusRaw : 'created';
+      const gatewayRaw = String(row.gateway || 'razorpay').trim().toLowerCase();
+      const gateway = ['razorpay', 'utr'].includes(gatewayRaw) ? gatewayRaw : 'razorpay';
+
+      const payload = {
+        orderId,
+        amount,
+        currency: String(row.currency || 'INR').trim().toUpperCase() || 'INR',
+        status,
+        gateway,
+        paymentId: row.paymentId ? String(row.paymentId).trim() : null,
+        paymentMethod: row.paymentMethod ? String(row.paymentMethod).trim() : null,
+        utr: row.utr ? String(row.utr).trim().toUpperCase() : null,
+        failureReason: row.failureReason ? String(row.failureReason).trim() : null,
+        adminNote: row.adminNote ? String(row.adminNote).trim() : null,
+        planId: row.planId ? String(row.planId).trim() : null,
+        planName: row.planName ? String(row.planName).trim() : null,
+        membershipActivated:
+          row.membershipActivated === true ||
+          String(row.membershipActivated || '').toLowerCase() === 'true' ||
+          String(row.membershipActivated || '') === '1',
+        customerDetails: {
+          name: String(row.customerName || row.name || '').trim(),
+          email: String(row.customerEmail || row.email || '')
+            .trim()
+            .toLowerCase(),
+          phone: String(row.customerPhone || row.phone || '').trim()
+        }
+      };
+
+      try {
+        const existing = await Payment.findOne({ orderId });
+        if (existing) {
+          Object.assign(existing, payload);
+          await existing.save();
+          updated += 1;
+        } else {
+          await Payment.create(payload);
+          created += 1;
+        }
+      } catch (err) {
+        skipped += 1;
+        errors.push({ row: i + 1, orderId, message: err.message || 'Import failed' });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Import done — ${created} created, ${updated} updated, ${skipped} skipped.`,
+      created,
+      updated,
+      skipped,
+      errors: errors.slice(0, 50)
+    });
+  } catch (err) {
+    console.error('[Payment] admin import error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to import payments.'
     });
   }
 };

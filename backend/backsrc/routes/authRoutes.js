@@ -25,6 +25,11 @@ import {
 } from '../services/byokSessionService.js';
 import { Payment } from '../models/Payment.js';
 import { activateMembershipForUser } from '../services/membershipActivation.js';
+import {
+  isSmtpReady,
+  sendOtpEmail,
+  shouldExposeOtpInApi
+} from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -81,19 +86,46 @@ const clientKey = (req, suffix) => {
   return `${suffix}:${ip}`;
 };
 
-/** Temporary fixed OTP until email/SMS delivery is wired. */
-const DEFAULT_OTP = '0000';
+const OTP_DIGITS = 6;
+const OTP_TTL_MS = 10 * 60 * 1000;
+
+function otpApiPayload(message, otp) {
+  const payload = { success: true, message };
+  if (shouldExposeOtpInApi() && otp) payload.otp = otp;
+  return payload;
+}
+
+async function issueAndSendOtp({ email, purpose, recipientName = '' }) {
+  if (!isSmtpReady()) {
+    throw new Error('Email OTP is unavailable. Admin must configure SMTP first.');
+  }
+  const code = await sendOtpEmail({
+    to: email,
+    purpose,
+    recipientName,
+    digits: OTP_DIGITS,
+    expiresMinutes: 10
+  });
+  return code;
+}
 
 async function begin2faChallenge(user) {
   const email = String(user.email).toLowerCase().trim();
-  const code = DEFAULT_OTP;
+  const code = await issueAndSendOtp({
+    email,
+    purpose: 'login',
+    recipientName: user.name || ''
+  });
   pending2fa.set(email, {
     codeHash: hashCode(code),
-    expiresAt: Date.now() + 10 * 60 * 1000,
+    expiresAt: Date.now() + OTP_TTL_MS,
     attempts: 0,
     userId: String(user._id || user.id),
     role: user.role
   });
+  if (shouldExposeOtpInApi()) {
+    console.log(`[AUTH_DEBUG] 2FA OTP for ${email}: ${code}`);
+  }
   return email;
 }
 
@@ -157,17 +189,24 @@ router.post('/register/send-otp', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already registered.' });
     }
 
+    const code = await issueAndSendOtp({
+      email: normalizedEmail,
+      purpose: 'signup'
+    });
+
     signupOtps.set(normalizedEmail, {
-      codeHash: hashCode(DEFAULT_OTP),
-      expiresAt: Date.now() + 10 * 60 * 1000,
+      codeHash: hashCode(code),
+      expiresAt: Date.now() + OTP_TTL_MS,
       attempts: 0
     });
 
-    return res.json({
-      success: true,
-      message: `Verification OTP sent. Use OTP ${DEFAULT_OTP} to continue.`,
-      otp: DEFAULT_OTP
-    });
+    if (shouldExposeOtpInApi()) {
+      console.log(`[AUTH_DEBUG] Signup OTP for ${normalizedEmail}: ${code}`);
+    }
+
+    return res.json(
+      otpApiPayload('Verification OTP sent to your email. Check your inbox.', code)
+    );
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -519,20 +558,34 @@ router.post('/forgot-password', async (req, res) => {
       }
     }
 
+    let debugOtp = null;
     if (accountExists) {
-      const recoveryCode = DEFAULT_OTP;
-      recoveryCodes.set(normalizedEmail, {
-        codeHash: hashCode(recoveryCode),
-        expiresAt: Date.now() + 10 * 60 * 1000,
-        attempts: 0
-      });
+      try {
+        const recoveryCode = await issueAndSendOtp({
+          email: normalizedEmail,
+          purpose: 'recovery'
+        });
+        recoveryCodes.set(normalizedEmail, {
+          codeHash: hashCode(recoveryCode),
+          expiresAt: Date.now() + OTP_TTL_MS,
+          attempts: 0
+        });
+        debugOtp = recoveryCode;
+        if (shouldExposeOtpInApi()) {
+          console.log(`[AUTH_DEBUG] Recovery OTP for ${normalizedEmail}: ${recoveryCode}`);
+        }
+      } catch (mailErr) {
+        console.error('[Auth] Recovery OTP email failed:', mailErr.message || mailErr);
+        return res.status(503).json({
+          success: false,
+          message: mailErr.message || 'Could not send recovery email. Check SMTP settings.'
+        });
+      }
     }
 
-    return res.json({
-      success: true,
-      message: `${genericMessage} Use OTP ${DEFAULT_OTP} to reset.`,
-      otp: DEFAULT_OTP
-    });
+    return res.json(
+      otpApiPayload(genericMessage, debugOtp)
+    );
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -854,16 +907,35 @@ router.post('/toggle-2fa', authMiddleware, async (req, res) => {
   }
 });
 
+function describeClient(ua = '') {
+  const agent = String(ua || '');
+  let device = 'Desktop';
+  if (/iPhone|iPad/i.test(agent)) device = 'iPhone / iPad';
+  else if (/Android/i.test(agent)) device = 'Android device';
+  else if (/Mac OS/i.test(agent)) device = 'Mac';
+  else if (/Windows/i.test(agent)) device = 'Windows PC';
+  else if (/Linux/i.test(agent)) device = 'Linux';
+
+  let browser = 'Browser';
+  if (/Edg\//i.test(agent)) browser = 'Edge';
+  else if (/Chrome\//i.test(agent) && !/Edg\//i.test(agent)) browser = 'Chrome';
+  else if (/Safari\//i.test(agent) && !/Chrome\//i.test(agent)) browser = 'Safari';
+  else if (/Firefox\//i.test(agent)) browser = 'Firefox';
+
+  return { device, browser };
+}
+
 // Get Active Sessions
 router.get('/sessions', authMiddleware, (req, res) => {
-  const currentIp = req.ip || '127.0.0.1';
+  const currentIp = req.ip || req.headers['x-forwarded-for'] || '127.0.0.1';
+  const { device, browser } = describeClient(req.headers['user-agent']);
   const sessions = [
     {
       id: 'sess_cur',
-      device: 'Current Browser',
-      browser: req.headers['user-agent']?.slice(0, 48) || 'Unknown',
-      ip: currentIp,
-      location: 'Local Session',
+      device,
+      browser,
+      ip: String(currentIp).split(',')[0].trim(),
+      location: 'This session',
       isCurrent: true,
       lastActive: new Date()
     }

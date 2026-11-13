@@ -2,14 +2,19 @@ import React from 'react';
 import { Route, Routes, Navigate } from 'react-router-dom';
 import AdminLayout from '../Layout/admin/AdminLayout';
 import Traders from '../Pages/Traders';
+import TraderForm from '../Pages/TraderForm';
 import Plans from '../Pages/Plans';
+import PlanForm from '../Pages/PlanForm';
 import BrokerApi from '../Pages/BrokerApi';
 import Broadcast from '../Pages/Broadcast';
 import LiveMonitor from '../Pages/LiveMonitor';
 import OpeningMomentumAdmin from '../Pages/OpeningMomentumAdmin';
 import SeoManager from '../Pages/SeoManager';
 import CmsPages from '../Pages/CmsPages';
-import AdminPayments from '../Pages/AdminPayments';
+import PaymentSettings from '../Pages/PaymentSettings';
+import PaymentHistory from '../Pages/PaymentHistory';
+import EmailTemplates from '../Pages/EmailTemplates';
+import SocialMedia from '../Pages/SocialMedia';
 import AdminLoginView from '../components/AdminLoginView';
 import { useAdmin } from '../context/AdminContext';
 
@@ -18,7 +23,7 @@ export default function AdminRoutes() {
 
   if (!sessionChecked) {
     return (
-      <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-400 text-sm">
+      <div className="flex min-h-screen items-center justify-center bg-admin-bg text-sm text-admin-muted">
         Verifying admin session...
       </div>
     );
@@ -39,9 +44,18 @@ export default function AdminRoutes() {
       <Route element={<AdminLayout />}>
         <Route index element={<Traders />} />
         <Route path="traders" element={<Traders />} />
+        <Route path="traders/new" element={<TraderForm />} />
+        <Route path="traders/:id/edit" element={<TraderForm />} />
         <Route path="plans" element={<Plans />} />
-        <Route path="payments" element={<AdminPayments />} />
+        <Route path="plans/new" element={<PlanForm />} />
+        <Route path="plans/:id/edit" element={<PlanForm />} />
+        <Route path="payments/history" element={<PaymentHistory />} />
+        <Route path="payments/settings" element={<PaymentSettings />} />
+        <Route path="payments" element={<Navigate to="/payments/history" replace />} />
         <Route path="broker" element={<BrokerApi />} />
+        <Route path="email-templates" element={<EmailTemplates />} />
+        <Route path="smtp" element={<Navigate to="/email-templates" replace />} />
+        <Route path="social" element={<SocialMedia />} />
         <Route path="broadcast" element={<Broadcast />} />
         <Route path="monitor" element={<LiveMonitor />} />
         <Route path="opening-momentum" element={<OpeningMomentumAdmin />} />

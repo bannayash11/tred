@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { X, TrendingUp, TrendingDown, Target, Layers, ArrowLeft } from 'lucide-react';
 import { fetchStock, getSocket } from '../services/api';
 import { getMembership } from '../lib/membership';
-import TradingViewChart from './TradingViewChart';
+import TradingViewChart, { toTradingViewSymbol } from './TradingViewChart';
 import ManualKotakChart, {
   loadSavedOverlays,
   saveOverlays,
@@ -84,7 +84,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
     allowedTfs.includes('5m') ? '5m' : allowedTfs[0] || '5m'
   );
   // Manual = Kotak LW chart (~5D + lines); TradingView = full history embed
-  const [chartMode, setChartMode] = useState('manual'); // 'manual' | 'tradingview'
+  const [chartMode, setChartMode] = useState('tradingview'); // 'manual' | 'tradingview'
   const [overlays, setOverlays] = useState(() => loadSavedOverlays());
   const [rangeKey, setRangeKey] = useState('5D');
 
@@ -247,8 +247,8 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const currentDisplayChange = liveChange ?? stockData?.change;
 
   const shellClass = asPage
-    ? 'relative flex min-h-[calc(100vh-11rem)] w-full flex-col rounded-3xl border border-slate-800 bg-[#0a0f1d] shadow-xl overflow-hidden'
-    : 'relative flex h-[90vh] w-full max-w-6xl flex-col rounded-3xl border border-slate-800 bg-[#0a0f1d] shadow-2xl overflow-hidden';
+    ? 'relative flex min-h-[calc(100vh-11rem)] w-full flex-col rounded-2xl sm:rounded-3xl border border-slate-800 bg-[#0a0f1d] shadow-xl overflow-hidden'
+    : 'relative flex h-[100dvh] sm:h-[90vh] w-full max-w-6xl flex-col rounded-none sm:rounded-3xl border-0 sm:border border-slate-800 bg-[#0a0f1d] shadow-2xl overflow-hidden';
 
   const content = (
       <div className={shellClass}>
@@ -268,6 +268,12 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-extrabold text-white">{symbol}</h2>
+                <span
+                  className="rounded bg-slate-900 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-300 border border-slate-700/80"
+                  title="TradingView symbol"
+                >
+                  {toTradingViewSymbol(symbol)}
+                </span>
                 <span className="rounded bg-cyan-950 px-2 py-0.5 text-xs font-semibold text-cyan-400 border border-cyan-800/50">
                   {stockData?.sector || 'NSE F&O'}
                 </span>
@@ -453,10 +459,20 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col lg:flex-row overflow-hidden min-h-[28rem]">
-          <div className={`relative flex-1 bg-[#090d16] p-3 sm:p-4 flex flex-col justify-center ${asPage ? 'min-h-[28rem] lg:min-h-[32rem]' : ''}`}>
+        <div
+          className={`flex flex-1 flex-col lg:flex-row overflow-hidden ${
+            chartMode === 'tradingview' ? 'min-h-0' : 'min-h-[28rem]'
+          }`}
+        >
+          <div
+            className={`relative flex-1 bg-[#090d16] p-2 sm:p-4 flex flex-col ${
+              chartMode === 'tradingview'
+                ? 'min-h-[min(68dvh,560px)] lg:min-h-[32rem] justify-stretch'
+                : `justify-center ${asPage ? 'min-h-[28rem] lg:min-h-[32rem]' : ''}`
+            }`}
+          >
             {chartMode === 'tradingview' ? (
-              <TradingViewChart symbol={symbol} timeframe={timeframe} />
+              <TradingViewChart symbol={symbol} timeframe={timeframe} className="flex-1" />
             ) : (
               <ManualKotakChart
                 stockData={stockData}
@@ -651,7 +667,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   if (asPage) return content;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-black/80 p-0 sm:p-4 backdrop-blur-md">
       {content}
     </div>
   );

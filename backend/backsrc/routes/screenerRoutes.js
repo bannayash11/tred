@@ -1,6 +1,7 @@
 import express from 'express';
 import { authMiddleware, requireActiveSubscription } from '../middleware/authMiddleware.js';
 import { marketDataService } from '../services/marketDataService.js';
+import { openingMomentumService } from '../services/openingMomentumService.js';
 
 const router = express.Router();
 
@@ -31,6 +32,52 @@ router.get('/opening-momentum', (req, res) => {
   try {
     const data = marketDataService.getOpeningMomentumData();
     res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// List archived EOD momentum session dates (for next-day preview)
+router.get('/opening-momentum/history/dates', async (req, res) => {
+  try {
+    const dates = await openingMomentumService.listHistoryDates(req.query.limit);
+    res.json({ success: true, dates });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Latest archived EOD snapshot
+router.get('/opening-momentum/history/latest', async (req, res) => {
+  try {
+    const doc = await openingMomentumService.getLatestHistorySnapshot();
+    if (!doc) {
+      return res.status(404).json({
+        success: false,
+        message: 'No archived momentum session yet. Data is saved automatically after market close.'
+      });
+    }
+    res.json({ success: true, data: openingMomentumService.formatHistoryPayload(doc) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Archived EOD snapshot by date (YYYY-MM-DD)
+router.get('/opening-momentum/history/:date', async (req, res) => {
+  try {
+    const date = String(req.params.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, message: 'Invalid date. Use YYYY-MM-DD.' });
+    }
+    const doc = await openingMomentumService.getHistorySnapshot(date);
+    if (!doc) {
+      return res.status(404).json({
+        success: false,
+        message: `No momentum archive found for ${date}.`
+      });
+    }
+    res.json({ success: true, data: openingMomentumService.formatHistoryPayload(doc) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

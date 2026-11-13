@@ -11,6 +11,8 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
+import PageHeader from '../components/ui/PageHeader';
+import Panel from '../components/ui/Panel';
 
 const ROBOTS_OPTIONS = [
   'index, follow',
@@ -114,57 +116,52 @@ export default function SeoManager() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl font-extrabold text-white flex items-center">
-            <Globe className="mr-2 h-5 w-5 text-amber-400" />
-            Website SEO Manager
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Manage meta title, description, Open Graph and robots for every public web page so the full site stays SEO-friendly.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleSeed}
-          disabled={seeding}
-          className="inline-flex items-center justify-center space-x-2 rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500/50 hover:text-amber-300 transition-colors disabled:opacity-60"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${seeding ? 'animate-spin' : ''}`} />
-          <span>{seeding ? 'Syncing pages…' : 'Sync / Register All Pages'}</span>
-        </button>
-      </div>
+      <PageHeader
+        title="SEO"
+        description="Meta tags, Open Graph, and robots per public route."
+        icon={Globe}
+        actions={
+          <button
+            type="button"
+            onClick={handleSeed}
+            disabled={seeding}
+            className="admin-btn-secondary"
+          >
+            <RefreshCw className={`h-4 w-4 ${seeding ? 'animate-spin' : ''}`} />
+            {seeding ? 'Syncing…' : 'Sync pages'}
+          </button>
+        }
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* Page list */}
-        <div className="xl:col-span-4 rounded-3xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden flex flex-col min-h-[520px]">
-          <div className="p-4 border-b border-slate-800 space-y-3">
+        <Panel className="xl:col-span-4 overflow-hidden flex flex-col min-h-[520px] p-0">
+          <div className="p-4 border-b border-admin-border space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center">
-                <FileText className="mr-1.5 h-4 w-4 text-amber-400" />
-                All Web Pages
+              <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
+                <FileText className="h-4 w-4 text-admin-accent" />
+                Pages
               </h3>
-              <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-400">
-                {seoPages.length} pages
+              <span className="admin-chip border-admin-border bg-admin-bg text-admin-muted">
+                {seoPages.length}
               </span>
             </div>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-admin-muted pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search page, path, title…"
-                className="w-full rounded-xl bg-slate-950 border border-slate-800 pl-9 pr-3 py-2 text-xs text-white focus:border-amber-400 focus:outline-none"
+                className="admin-input pl-10 text-xs"
               />
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1 max-h-[560px]">
             {filtered.length === 0 && (
-              <div className="text-center text-xs text-slate-500 py-10 px-4">
-                No pages found. Click “Sync / Register All Pages” to load the website routes.
+              <div className="text-center text-xs text-admin-muted py-10 px-4">
+                No pages found. Use Sync pages to register routes.
               </div>
             )}
 
@@ -181,66 +178,62 @@ export default function SeoManager() {
                     }
                     selectPage(page);
                   }}
-                  className={`w-full text-left rounded-2xl px-3.5 py-3 transition-all border ${
+                  className={`w-full text-left rounded-xl px-3.5 py-3 transition-all border ${
                     active
-                      ? 'bg-amber-500/15 border-amber-500/40 shadow-sm'
-                      : 'bg-transparent border-transparent hover:bg-slate-800/50 hover:border-slate-800'
+                      ? 'bg-admin-accent/10 border-admin-accent/40'
+                      : 'bg-transparent border-transparent hover:bg-admin-bg hover:border-admin-border'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className={`text-xs font-bold truncate ${active ? 'text-amber-300' : 'text-white'}`}>
+                      <div className={`text-xs font-semibold truncate ${active ? 'text-admin-accent' : 'text-white'}`}>
                         {page.pageName}
                       </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">{page.path}</div>
+                      <div className="text-[10px] text-admin-muted font-mono mt-0.5 truncate">{page.path}</div>
                     </div>
                     <span
-                      className={`shrink-0 mt-0.5 inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border ${
+                      className={`admin-chip shrink-0 mt-0.5 text-[9px] uppercase ${
                         page.isActive !== false
-                          ? 'bg-emerald-950/70 text-emerald-400 border-emerald-800/50'
-                          : 'bg-slate-900 text-slate-500 border-slate-700'
+                          ? 'border-emerald-800/50 bg-emerald-950/60 text-emerald-300'
+                          : 'border-admin-border bg-admin-bg text-admin-muted'
                       }`}
                     >
                       {page.isActive !== false ? 'ON' : 'OFF'}
                     </span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1.5 line-clamp-1">
-                    {page.metaTitle || 'No meta title set'}
+                  <div className="text-[10px] text-admin-muted mt-1.5 line-clamp-1">
+                    {page.metaTitle || 'No meta title'}
                   </div>
                 </button>
               );
             })}
           </div>
-        </div>
+        </Panel>
 
         {/* Editor */}
-        <div className="xl:col-span-8 rounded-3xl border border-slate-800 bg-slate-900/60 shadow-xl p-6">
+        <Panel className="xl:col-span-8 p-6">
           {!selected ? (
-            <div className="h-full min-h-[420px] flex flex-col items-center justify-center text-slate-500 text-sm space-y-3">
+            <div className="h-full min-h-[420px] flex flex-col items-center justify-center text-admin-muted text-sm space-y-3">
               <Globe className="h-10 w-10 opacity-40" />
-              <p>Select a page from the left to edit its SEO.</p>
-              <button
-                type="button"
-                onClick={handleSeed}
-                className="rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-black"
-              >
-                Register All Website Pages
+              <p>Select a page to edit SEO.</p>
+              <button type="button" onClick={handleSeed} className="admin-btn-primary">
+                Sync pages
               </button>
             </div>
           ) : (
             <form onSubmit={handleSave} className="space-y-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-800 pb-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-admin-border pb-4">
                 <div>
-                  <h3 className="text-base font-extrabold text-white">{form.pageName || selected.pageName}</h3>
+                  <h3 className="text-base font-semibold text-white">{form.pageName || selected.pageName}</h3>
                   <div className="flex flex-wrap items-center gap-2 mt-1">
-                    <span className="font-mono text-[11px] text-cyan-400/90 bg-cyan-950/40 border border-cyan-900/50 rounded px-2 py-0.5">
+                    <span className="admin-chip font-mono text-[11px] border-admin-border bg-admin-bg text-admin-accent">
                       {form.path}
                     </span>
-                    <span className="text-[10px] text-slate-500 uppercase tracking-wide">
+                    <span className="text-[10px] text-admin-muted uppercase tracking-wide">
                       key: {selected.pageKey}
                     </span>
                     {dirty && (
-                      <span className="text-[10px] font-bold text-amber-400">Unsaved changes</span>
+                      <span className="text-[10px] font-semibold text-admin-accent">Unsaved</span>
                     )}
                   </div>
                 </div>
@@ -249,21 +242,21 @@ export default function SeoManager() {
                   <button
                     type="button"
                     onClick={() => setField('isActive', !form.isActive)}
-                    className={`inline-flex items-center space-x-1.5 rounded-xl border px-3 py-2 text-[11px] font-semibold transition-colors ${
+                    className={`admin-btn-ghost text-[11px] ${
                       form.isActive
-                        ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-300'
-                        : 'border-slate-700 bg-slate-950 text-slate-400'
+                        ? 'border-emerald-800/60 !bg-emerald-950/40 !text-emerald-300'
+                        : ''
                     }`}
                   >
                     {form.isActive ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                    <span>{form.isActive ? 'SEO Active' : 'SEO Disabled'}</span>
+                    <span>{form.isActive ? 'Active' : 'Disabled'}</span>
                   </button>
 
                   <a
                     href={`http://localhost:3000${form.path.replace('/:id', '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center space-x-1.5 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] font-semibold text-slate-300 hover:text-cyan-300"
+                    className="admin-btn-ghost text-[11px]"
                     onClick={() => showToast('Opening page on web terminal…')}
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -273,9 +266,9 @@ export default function SeoManager() {
               </div>
 
               {/* Google preview */}
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 space-y-1.5">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Search Preview
+              <div className="rounded-xl border border-admin-border bg-admin-bg p-4 space-y-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-admin-muted mb-2">
+                  Search preview
                 </div>
                 <div className="text-sm text-[#8ab4f8] font-medium truncate">
                   {form.metaTitle || 'Page title will appear here'}
@@ -291,7 +284,7 @@ export default function SeoManager() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div className="md:col-span-2">
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-slate-400">Meta Title</label>
+                    <label className="admin-label">Meta title</label>
                     <span
                       className={`text-[10px] font-mono ${
                         titleLen > 60 ? 'text-rose-400' : titleLen >= 45 ? 'text-emerald-400' : 'text-slate-500'
@@ -305,13 +298,13 @@ export default function SeoManager() {
                     value={form.metaTitle}
                     onChange={(e) => setField('metaTitle', e.target.value)}
                     placeholder="Optimal ~50–60 characters"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div className="md:col-span-2">
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-slate-400">Meta Description</label>
+                    <label className="admin-label">Meta description</label>
                     <span
                       className={`text-[10px] font-mono ${
                         descLen > 160 ? 'text-rose-400' : descLen >= 120 ? 'text-emerald-400' : 'text-slate-500'
@@ -325,38 +318,38 @@ export default function SeoManager() {
                     value={form.metaDescription}
                     onChange={(e) => setField('metaDescription', e.target.value)}
                     placeholder="Optimal ~140–160 characters — clear value proposition for search results"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="text-slate-400 block mb-1">Meta Keywords (comma separated)</label>
+                  <label className="admin-label block mb-1">Meta keywords</label>
                   <input
                     type="text"
                     value={form.metaKeywords}
                     onChange={(e) => setField('metaKeywords', e.target.value)}
                     placeholder="order block, SMC, liquidity, nifty…"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">Canonical URL</label>
+                  <label className="admin-label block mb-1">Canonical URL</label>
                   <input
                     type="text"
                     value={form.canonicalUrl}
                     onChange={(e) => setField('canonicalUrl', e.target.value)}
                     placeholder="/pricing"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none font-mono"
+                    className="admin-input font-mono"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">Robots</label>
+                  <label className="admin-label block mb-1">Robots</label>
                   <select
                     value={form.robots}
                     onChange={(e) => setField('robots', e.target.value)}
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   >
                     {ROBOTS_OPTIONS.map((opt) => (
                       <option key={opt} value={opt}>
@@ -367,95 +360,91 @@ export default function SeoManager() {
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">OG Title</label>
+                  <label className="admin-label block mb-1">OG title</label>
                   <input
                     type="text"
                     value={form.ogTitle}
                     onChange={(e) => setField('ogTitle', e.target.value)}
                     placeholder="Social share title"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">OG Image URL</label>
+                  <label className="admin-label block mb-1">OG image URL</label>
                   <input
                     type="text"
                     value={form.ogImage}
                     onChange={(e) => setField('ogImage', e.target.value)}
                     placeholder="https://…/og-image.jpg"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="text-slate-400 block mb-1">OG Description</label>
+                  <label className="admin-label block mb-1">OG description</label>
                   <textarea
                     rows={2}
                     value={form.ogDescription}
                     onChange={(e) => setField('ogDescription', e.target.value)}
                     placeholder="Social share description"
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="text-slate-400 block mb-1">
-                    Schema Markup (JSON-LD){' '}
-                    <span className="text-slate-600">— optional structured data</span>
+                  <label className="admin-label block mb-1">
+                    Schema (JSON-LD){' '}
+                    <span className="text-admin-muted font-normal">optional</span>
                   </label>
                   <textarea
                     rows={4}
                     value={form.schemaMarkup}
                     onChange={(e) => setField('schemaMarkup', e.target.value)}
                     placeholder='{"@context":"https://schema.org","@type":"WebPage",...}'
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none font-mono text-[11px]"
+                    className="admin-input font-mono text-[11px]"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">Display Name (admin)</label>
+                  <label className="admin-label block mb-1">Display name</label>
                   <input
                     type="text"
                     value={form.pageName}
                     onChange={(e) => setField('pageName', e.target.value)}
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                    className="admin-input"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">Route Path</label>
+                  <label className="admin-label block mb-1">Route path</label>
                   <input
                     type="text"
                     value={form.path}
                     onChange={(e) => setField('path', e.target.value)}
-                    className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none font-mono"
+                    className="admin-input font-mono"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-                <p className="text-[10px] text-slate-500 max-w-md">
-                  Changes apply on the live website as soon as you save. Title, description, OG tags and robots update per page route.
+              <div className="flex items-center justify-between pt-2 border-t border-admin-border">
+                <p className="text-[10px] text-admin-muted max-w-md">
+                  Saved changes go live on the website immediately.
                 </p>
-                <button
-                  type="submit"
-                  disabled={saving || !dirty}
-                  className="inline-flex items-center space-x-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-2.5 text-xs font-bold text-black shadow-md shadow-amber-500/20 disabled:opacity-50 hover:opacity-95"
-                >
+                <button type="submit" disabled={saving || !dirty} className="admin-btn-primary">
                   {saving ? (
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <RefreshCw className="h-4 w-4 animate-spin" />
                   ) : dirty ? (
-                    <Save className="h-3.5 w-3.5" />
+                    <Save className="h-4 w-4" />
                   ) : (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <CheckCircle2 className="h-4 w-4" />
                   )}
-                  <span>{saving ? 'Saving…' : dirty ? 'Save SEO Settings' : 'Saved'}</span>
+                  <span>{saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}</span>
                 </button>
               </div>
             </form>
           )}
-        </div>
+        </Panel>
       </div>
     </div>
   );

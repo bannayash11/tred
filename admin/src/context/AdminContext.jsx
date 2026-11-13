@@ -7,6 +7,9 @@ import {
   updateAnnouncementConfig,
   updateByokSalesConfig,
   updateFreeTrialConfig,
+  updatePaymentMethodsConfig,
+  updateUtrPayConfig,
+  uploadUtrQrImage,
   fetchScreener,
   getMe
 } from '../services/api';
@@ -42,7 +45,16 @@ export function AdminProvider({ children }) {
     announcementEnabled: true,
     byokSalesEnabled: true,
     freeTrialEnabled: false,
-    freeTrialDays: 14
+    freeTrialDays: 14,
+    razorpayEnabled: false,
+    utrEnabled: true,
+    utrAutoApprove: false,
+    utrPay: {
+      upiId: '',
+      payeeName: 'Tradrift',
+      qrImageUrl: '',
+      instructions: ''
+    }
   });
   const [toast, setToast] = useState('');
   const [loading, setLoading] = useState(false);
@@ -90,7 +102,22 @@ export function AdminProvider({ children }) {
             freeTrialDays:
               res.settings.freeTrialDays !== undefined
                 ? res.settings.freeTrialDays
-                : prev.freeTrialDays
+                : prev.freeTrialDays,
+            razorpayEnabled:
+              res.settings.razorpayEnabled !== undefined
+                ? res.settings.razorpayEnabled
+                : prev.razorpayEnabled,
+            utrEnabled:
+              res.settings.utrEnabled !== undefined
+                ? res.settings.utrEnabled
+                : prev.utrEnabled,
+            utrAutoApprove:
+              res.settings.utrAutoApprove !== undefined
+                ? res.settings.utrAutoApprove
+                : prev.utrAutoApprove,
+            utrPay: res.settings.utrPay
+              ? { ...prev.utrPay, ...res.settings.utrPay }
+              : prev.utrPay
           }));
         }
       }
@@ -415,6 +442,68 @@ export function AdminProvider({ children }) {
     }
   };
 
+  const savePaymentMethods = async ({ razorpayEnabled, utrEnabled, utrAutoApprove } = {}) => {
+    try {
+      const res = await updatePaymentMethodsConfig({
+        razorpayEnabled,
+        utrEnabled,
+        utrAutoApprove
+      });
+      setSystemSettings((prev) => ({
+        ...prev,
+        razorpayEnabled:
+          res.razorpayEnabled !== undefined ? res.razorpayEnabled : !!razorpayEnabled,
+        utrEnabled: res.utrEnabled !== undefined ? res.utrEnabled : !!utrEnabled,
+        utrAutoApprove:
+          res.utrAutoApprove !== undefined ? res.utrAutoApprove : !!utrAutoApprove,
+        utrPay: res.utrPay ? { ...prev.utrPay, ...res.utrPay } : prev.utrPay
+      }));
+      showToast(res.message || 'Payment methods updated.');
+      return res;
+    } catch (err) {
+      showToast(
+        err?.userMessage || err?.response?.data?.message || 'Could not update payment methods.'
+      );
+      throw err;
+    }
+  };
+
+  const saveUtrPay = async (payload = {}) => {
+    try {
+      const res = await updateUtrPayConfig(payload);
+      setSystemSettings((prev) => ({
+        ...prev,
+        utrPay: res.utrPay ? { ...prev.utrPay, ...res.utrPay } : { ...prev.utrPay, ...payload }
+      }));
+      showToast(res.message || 'UTR / UPI details saved.');
+      return res;
+    } catch (err) {
+      showToast(
+        err?.userMessage || err?.response?.data?.message || 'Could not save UTR / UPI details.'
+      );
+      throw err;
+    }
+  };
+
+  const uploadUtrQr = async (imageBase64, mimeType) => {
+    try {
+      const res = await uploadUtrQrImage({ imageBase64, mimeType });
+      setSystemSettings((prev) => ({
+        ...prev,
+        utrPay: res.utrPay
+          ? { ...prev.utrPay, ...res.utrPay }
+          : { ...prev.utrPay, qrImageUrl: res.qrImageUrl || prev.utrPay?.qrImageUrl }
+      }));
+      showToast(res.message || 'UPI QR uploaded.');
+      return res;
+    } catch (err) {
+      showToast(
+        err?.userMessage || err?.response?.data?.message || 'Could not upload UPI QR image.'
+      );
+      throw err;
+    }
+  };
+
   const stats = {
     totalUsers: usersList.length,
     activeSubscribers: usersList.filter(u => u.subscription?.status === 'active').length,
@@ -445,6 +534,9 @@ export function AdminProvider({ children }) {
         refreshData: loadData,
         saveByokSales,
         saveFreeTrial,
+        savePaymentMethods,
+        saveUtrPay,
+        uploadUtrQr,
         createUser,
         updateUser,
         deleteUser,

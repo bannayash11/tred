@@ -13,6 +13,8 @@ import {
   Scale
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
+import PageHeader from '../components/ui/PageHeader';
+import Panel from '../components/ui/Panel';
 
 const PAGE_META = {
   'privacy-policy': { icon: Shield, label: 'Privacy Policy', path: '/privacy-policy' },
@@ -87,28 +89,20 @@ export default function CmsPages() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl font-extrabold text-white flex items-center">
-            <FileText className="mr-2 h-5 w-5 text-amber-400" />
-            CMS Pages
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Manage Privacy Policy, Terms & Conditions, and FAQ content shown on the website and signup.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleSeed}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500/50 hover:text-amber-300"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Sync Default Pages
-        </button>
-      </div>
+      <PageHeader
+        title="CMS pages"
+        description="Privacy, terms, and FAQ content for the website."
+        icon={FileText}
+        actions={
+          <button type="button" onClick={handleSeed} className="admin-btn-secondary">
+            <RefreshCw className="h-4 w-4" />
+            Sync defaults
+          </button>
+        }
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        <div className="xl:col-span-3 rounded-3xl border border-slate-800 bg-slate-900/60 p-3 space-y-1.5 shadow-xl">
+        <Panel className="xl:col-span-3 p-3 space-y-1.5">
           {Object.entries(PAGE_META).map(([slug, meta]) => {
             const Icon = meta.icon;
             const page = cmsPages.find((p) => p.slug === slug);
@@ -118,25 +112,25 @@ export default function CmsPages() {
                 key={slug}
                 type="button"
                 onClick={() => handleSelect(slug)}
-                className={`w-full text-left rounded-2xl px-3.5 py-3 border transition-all ${
+                className={`w-full text-left rounded-xl px-3.5 py-3 border transition-all ${
                   active
-                    ? 'bg-amber-500/15 border-amber-500/40'
-                    : 'border-transparent hover:bg-slate-800/60'
+                    ? 'bg-admin-accent/10 border-admin-accent/40'
+                    : 'border-transparent hover:bg-admin-bg'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
-                  <Icon className={`h-4 w-4 ${active ? 'text-amber-300' : 'text-slate-400'}`} />
+                  <Icon className={`h-4 w-4 ${active ? 'text-admin-accent' : 'text-admin-muted'}`} />
                   <div className="min-w-0">
-                    <div className={`text-xs font-bold ${active ? 'text-amber-300' : 'text-white'}`}>
+                    <div className={`text-xs font-semibold ${active ? 'text-admin-accent' : 'text-white'}`}>
                       {meta.label}
                     </div>
-                    <div className="text-[10px] text-slate-500 font-mono truncate">{meta.path}</div>
+                    <div className="text-[10px] text-admin-muted font-mono truncate">{meta.path}</div>
                   </div>
                   <span
-                    className={`ml-auto text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${
+                    className={`admin-chip ml-auto text-[9px] uppercase ${
                       page?.isPublished !== false
-                        ? 'text-emerald-400 border-emerald-800/50 bg-emerald-950/40'
-                        : 'text-slate-500 border-slate-700'
+                        ? 'border-emerald-800/50 bg-emerald-950/60 text-emerald-300'
+                        : 'border-admin-border bg-admin-bg text-admin-muted'
                     }`}
                   >
                     {page?.isPublished !== false ? 'ON' : 'OFF'}
@@ -145,19 +139,19 @@ export default function CmsPages() {
               </button>
             );
           })}
-        </div>
+        </Panel>
 
-        <div className="xl:col-span-9 rounded-3xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl">
+        <Panel className="xl:col-span-9 p-6">
           <form onSubmit={handleSave} className="space-y-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-800 pb-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-admin-border pb-4">
               <div>
-                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                  <SelectedIcon className="h-4 w-4 text-amber-400" />
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <SelectedIcon className="h-4 w-4 text-admin-accent" />
                   {selectedMeta.label}
                 </h3>
-                <p className="text-[11px] text-slate-500 font-mono mt-1">
-                  Public URL: {selectedMeta.path}
-                  {dirty && <span className="ml-2 text-amber-400 font-sans font-bold">· Unsaved</span>}
+                <p className="text-[11px] text-admin-muted font-mono mt-1">
+                  {selectedMeta.path}
+                  {dirty && <span className="ml-2 text-admin-accent font-sans font-semibold">· Unsaved</span>}
                 </p>
               </div>
               <button
@@ -166,10 +160,10 @@ export default function CmsPages() {
                   setIsPublished(!isPublished);
                   markDirty();
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-semibold ${
+                className={`admin-btn-ghost text-[11px] ${
                   isPublished
-                    ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-300'
-                    : 'border-slate-700 bg-slate-950 text-slate-400'
+                    ? 'border-emerald-800/60 !bg-emerald-950/40 !text-emerald-300'
+                    : ''
                 }`}
               >
                 {isPublished ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
@@ -179,7 +173,7 @@ export default function CmsPages() {
 
             <div className="text-xs space-y-4">
               <div>
-                <label className="text-slate-400 block mb-1">Page Title</label>
+                <label className="admin-label block mb-1">Page title</label>
                 <input
                   type="text"
                   value={title}
@@ -187,21 +181,21 @@ export default function CmsPages() {
                     setTitle(e.target.value);
                     markDirty();
                   }}
-                  className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                  className="admin-input"
                 />
               </div>
 
               {selectedSlug === 'faq' ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-slate-400">FAQ Items</label>
+                    <label className="admin-label">FAQ items</label>
                     <button
                       type="button"
                       onClick={() => {
                         setFaqItems((prev) => [...prev, emptyFaq()]);
                         markDirty();
                       }}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300"
+                      className="admin-btn-ghost text-[11px] text-admin-accent"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       Add Question
@@ -211,7 +205,7 @@ export default function CmsPages() {
                   {faqItems.map((item, index) => (
                     <div
                       key={index}
-                      className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2"
+                      className="rounded-xl border border-admin-border bg-admin-bg p-3.5 space-y-2"
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -239,7 +233,7 @@ export default function CmsPages() {
                           setFaqItems(next);
                           markDirty();
                         }}
-                        className="w-full rounded-xl bg-slate-900 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                        className="admin-input"
                       />
                       <textarea
                         rows={3}
@@ -251,15 +245,15 @@ export default function CmsPages() {
                           setFaqItems(next);
                           markDirty();
                         }}
-                        className="w-full rounded-xl bg-slate-900 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+                        className="admin-input"
                       />
                     </div>
                   ))}
                 </div>
               ) : (
                 <div>
-                  <label className="text-slate-400 block mb-1">
-                    Page Content <span className="text-slate-600">(Markdown supported)</span>
+                  <label className="admin-label block mb-1">
+                    Content <span className="text-admin-muted font-normal">(Markdown)</span>
                   </label>
                   <textarea
                     rows={16}
@@ -268,33 +262,29 @@ export default function CmsPages() {
                       setContent(e.target.value);
                       markDirty();
                     }}
-                    className="w-full rounded-xl bg-slate-950 p-3 text-white border border-slate-800 focus:border-amber-400 focus:outline-none font-mono text-[11px] leading-relaxed"
+                    className="admin-input font-mono text-[11px] leading-relaxed"
                   />
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-              <p className="text-[10px] text-slate-500 max-w-sm">
-                Signup requires users to accept Terms & Privacy. Keep these pages updated and published.
+            <div className="flex items-center justify-between pt-2 border-t border-admin-border">
+              <p className="text-[10px] text-admin-muted max-w-sm">
+                Keep legal pages published for signup acceptance.
               </p>
-              <button
-                type="submit"
-                disabled={saving || !dirty}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-2.5 text-xs font-bold text-black disabled:opacity-50"
-              >
+              <button type="submit" disabled={saving || !dirty} className="admin-btn-primary">
                 {saving ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <RefreshCw className="h-4 w-4 animate-spin" />
                 ) : dirty ? (
-                  <Save className="h-3.5 w-3.5" />
+                  <Save className="h-4 w-4" />
                 ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <CheckCircle2 className="h-4 w-4" />
                 )}
-                <span>{saving ? 'Saving…' : dirty ? 'Save CMS Page' : 'Saved'}</span>
+                <span>{saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}</span>
               </button>
             </div>
           </form>
-        </div>
+        </Panel>
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ChartModal from '../components/ChartModal';
+import { parseChartSymbolParam } from '../lib/chartRoutes';
 
 export default function Chart() {
   const { symbol } = useParams();
   const navigate = useNavigate();
-  const sym = String(symbol || '').toUpperCase();
+  const sym = parseChartSymbolParam(symbol);
 
   const handleClose = () => {
     if (window.history.length > 1) navigate(-1);

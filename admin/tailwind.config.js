@@ -1,27 +1,26 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        background: '#090d16',
-        surface: '#0f172a',
-        surfaceLight: '#1e293b',
-        borderMuted: '#334155',
-        bullish: '#10b981',
-        bullishGlow: 'rgba(16, 185, 129, 0.15)',
-        bearish: '#f43f5e',
-        bearishGlow: 'rgba(244, 63, 94, 0.15)',
-        accentCyan: '#06b6d4',
-        accentGold: '#f59e0b'
+        admin: {
+          bg: '#0b0f14',
+          surface: '#12181f',
+          surface2: '#182028',
+          border: '#243040',
+          muted: '#8b9aab',
+          accent: '#4cc9c0',
+          danger: '#f43f5e',
+          success: '#34d399',
+          warn: '#fbbf24'
+        }
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+        sans: ['Outfit', 'system-ui', 'sans-serif'],
+        mono: ['IBM Plex Mono', 'JetBrains Mono', 'monospace']
       }
-    },
+    }
   },
-  plugins: [],
-}
+  plugins: []
+};

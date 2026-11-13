@@ -1,5 +1,12 @@
 import { Settings } from '../models/Settings.js';
-import { marketParts, isTradingDay } from './orderFlow/marketSession.js';
+import { OpeningMomentumDailySnapshot } from '../models/OpeningMomentumDailySnapshot.js';
+import {
+  marketParts,
+  isTradingDay,
+  isMarketSessionTime,
+  marketCloseMinuteFor,
+  getLatestTradingSessionDate
+} from './orderFlow/marketSession.js';
 
 /**
  * Opening 5-Minute Momentum Scanner Engine
@@ -20,6 +27,44 @@ import { marketParts, isTradingDay } from './orderFlow/marketSession.js';
 const DEFAULT_FREEZE_HHMM = '09:20';
 const OPENING_CANDLE_MINS = 9 * 60 + 15; // 09:15 bar → closes at 09:20
 const ENSURE_POLL_MS = 15_000;
+const ARCHIVE_POLL_MS = 30_000;
+
+function enrichMoverForEod(mover, side = 'gainer') {
+  const closeLtp = Number(mover.ltp) || 0;
+  const refClose = Number(mover.refClose) || 0;
+  const closeMovementPercent =
+    refClose > 0
+      ? parseFloat((((closeLtp - refClose) / refClose) * 100).toFixed(2))
+      : Number(mover.movementPercent) || 0;
+  const closePointsChange =
+    refClose > 0
+      ? parseFloat((closeLtp - refClose).toFixed(2))
+      : Number(mover.pointsChange) || 0;
+
+  // Long top gainers / short top losers from 09:20 → EOD
+  const simPnlPercent =
+    side === 'loser'
+      ? parseFloat((-closeMovementPercent).toFixed(2))
+      : closeMovementPercent;
+  const simPnlPoints =
+    side === 'loser'
+      ? parseFloat((-closePointsChange).toFixed(2))
+      : closePointsChange;
+
+  let result = 'FLAT';
+  if (simPnlPercent > 0.05) result = 'PROFIT';
+  else if (simPnlPercent < -0.05) result = 'LOSS';
+
+  return {
+    ...mover,
+    closeLtp,
+    closeMovementPercent,
+    closePointsChange,
+    simPnlPercent,
+    simPnlPoints,
+    result
+  };
+}
 
 function parseFreezeMinutes(freezeTime = DEFAULT_FREEZE_HHMM) {
   const match = String(freezeTime || DEFAULT_FREEZE_HHMM).match(/^(\d{1,2}):(\d{2})$/);
@@ -61,6 +106,10 @@ export class OpeningMomentumService {
     this._getStocksMap = null;
     this._freezeTimer = null;
     this._ensureInterval = null;
+    this._archiveTimer = null;
+    this._archiveInterval = null;
+    this._archivedSessionDate = null;
+    this._archiveInFlight = false;
   }
 
   async initialize(ioInstance = null) {
@@ -196,6 +245,290 @@ export class OpeningMomentumService {
     if (reason) {
       console.log(`[OpeningMomentumService] Freeze cleared: ${reason}`);
     }
+  }
+
+  /**
+   * Persist today's Top gainers/losers + breadth at market close so users can
+   * preview next day which names worked and simulated P&L from 09:20 → close.
+   */
+  async archiveSession(stocksMap, { force = false, source = 'auto_eod' } = {}) {
+    if (this._archiveInFlight && !force) {
+      return { success: false, message: 'Archive already in progress.' };
+    }
+
+    const sessionDate =
+      this.frozenSessionDate ||
+      (this.hasValidFreeze() ? marketParts(Date.now()).dateKey : null) ||
+      getLatestTradingSessionDate();
+
+    if (!force && this._archivedSessionDate === sessionDate) {
+      return { success: true, skipped: true, message: `Already archived ${sessionDate}.`, sessionDate };
+    }
+
+    // Snapshot rankings synchronously before any await / freeze clear
+    let live = null;
+    if (stocksMap && this.hasValidFreeze()) {
+      live = this.getLiveRankings(stocksMap);
+    } else if (this.cachedPayload?.gainers?.length || this.cachedPayload?.losers?.length) {
+      live = this.cachedPayload;
+    }
+
+    if (!live || (!live.gainers?.length && !live.losers?.length)) {
+      return {
+        success: false,
+        message: 'No valid freeze / rankings to archive.',
+        sessionDate
+      };
+    }
+
+    const gainers = (live.gainers || []).map((m) => enrichMoverForEod(m, 'gainer'));
+    const losers = (live.losers || []).map((m) => enrichMoverForEod(m, 'loser'));
+    const liveFrozenAt = live.frozenAt || this.frozenAt;
+    const liveFreezeTime = live.freezeTime || this.settings.freezeTime;
+    const liveTopCount = live.topCount || this.settings.topCount;
+    const liveMinRvol = live.minRvol ?? this.settings.minRvol;
+    const liveBreakoutOnly = live.breakoutOnly ?? this.settings.breakoutOnly;
+    const liveBreadth = live.breadth || live.stats?.breadth || {};
+    const liveStats = live.stats || {};
+
+    this._archiveInFlight = true;
+    try {
+      if (!force) {
+        try {
+          const existing = await OpeningMomentumDailySnapshot.findOne({ sessionDate }).select('_id').lean();
+          if (existing) {
+            this._archivedSessionDate = sessionDate;
+            return {
+              success: true,
+              skipped: true,
+              message: `Snapshot already exists for ${sessionDate}.`,
+              sessionDate
+            };
+          }
+        } catch {
+          // Mongo may be down — continue and try upsert
+        }
+      }
+
+      const profitGainers = gainers.filter((m) => m.result === 'PROFIT').length;
+      const profitLosers = losers.filter((m) => m.result === 'PROFIT').length;
+      const avgGainerPnl = gainers.length
+        ? parseFloat(
+            (gainers.reduce((a, m) => a + (m.simPnlPercent || 0), 0) / gainers.length).toFixed(2)
+          )
+        : 0;
+      const avgLoserPnl = losers.length
+        ? parseFloat(
+            (losers.reduce((a, m) => a + (m.simPnlPercent || 0), 0) / losers.length).toFixed(2)
+          )
+        : 0;
+
+      const doc = {
+        sessionDate,
+        frozenAt: liveFrozenAt,
+        freezeTime: liveFreezeTime,
+        topCount: liveTopCount,
+        minRvol: liveMinRvol,
+        breakoutOnly: liveBreakoutOnly,
+        gainers,
+        losers,
+        breadth: liveBreadth,
+        stats: {
+          ...liveStats,
+          eod: {
+            profitGainers,
+            profitLosers,
+            avgGainerPnl,
+            avgLoserPnl,
+            gainerHitRate:
+              gainers.length > 0
+                ? Math.round((profitGainers / gainers.length) * 100)
+                : 0,
+            loserHitRate:
+              losers.length > 0 ? Math.round((profitLosers / losers.length) * 100) : 0
+          }
+        },
+        source,
+        savedAt: new Date()
+      };
+
+      const saved = await OpeningMomentumDailySnapshot.findOneAndUpdate(
+        { sessionDate },
+        { $set: doc },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+
+      this._archivedSessionDate = sessionDate;
+      console.log(
+        `[OpeningMomentumService] 📦 Archived ${sessionDate} EOD snapshot` +
+          ` (G:${gainers.length} L:${losers.length}, source=${source}).`
+      );
+
+      return {
+        success: true,
+        sessionDate,
+        gainersCount: gainers.length,
+        losersCount: losers.length,
+        snapshotId: saved?._id,
+        message: `Saved EOD momentum snapshot for ${sessionDate}.`
+      };
+    } catch (err) {
+      console.warn('[OpeningMomentumService] Archive failed:', err.message);
+      return { success: false, message: err.message || 'Archive failed.', sessionDate };
+    } finally {
+      this._archiveInFlight = false;
+    }
+  }
+
+  async ensureArchivedIfClosed(stocksMap) {
+    const now = Date.now();
+    if (isMarketSessionTime(now)) return null;
+
+    const parts = marketParts(now);
+    const closeMinute = marketCloseMinuteFor(now);
+
+    // After close on a trading day, or any non-session moment with a valid freeze for that day
+    const sessionDate = this.frozenSessionDate || getLatestTradingSessionDate(now);
+    if (!sessionDate) return null;
+
+    // Only auto-archive once market has closed for that session date
+    if (parts.dateKey === sessionDate && parts.minuteOfDay <= closeMinute && isTradingDay(now)) {
+      return null;
+    }
+
+    if (!this.hasValidFreeze(sessionDate) && !this.cachedPayload) {
+      return null;
+    }
+
+    return this.archiveSession(stocksMap, { source: 'auto_eod' });
+  }
+
+  msUntilNextArchive() {
+    const now = Date.now();
+    const parts = marketParts(now);
+    let target = new Date(now);
+
+    for (let i = 0; i < 10; i += 1) {
+      const p = marketParts(target.getTime());
+      const closeMins = marketCloseMinuteFor(target);
+      const atOrPastToday =
+        p.dateKey === parts.dateKey && parts.minuteOfDay > closeMins;
+      if (isTradingDay(target) && !(i === 0 && atOrPastToday)) {
+        // Archive ~1 min after close so last ticks settle
+        const archiveMins = closeMins + 1;
+        const istAsUtc = Date.UTC(
+          p.year,
+          p.month - 1,
+          p.day,
+          Math.floor(archiveMins / 60),
+          archiveMins % 60,
+          5
+        );
+        const utcMs = istAsUtc - 330 * 60_000;
+        if (utcMs > now + 1000) return utcMs - now;
+      }
+      target = new Date(target.getTime() + 24 * 60 * 60 * 1000);
+    }
+    return 60 * 60 * 1000;
+  }
+
+  startArchiveScheduler(getStocksMap) {
+    if (this._archiveTimer) {
+      clearTimeout(this._archiveTimer);
+      this._archiveTimer = null;
+    }
+    if (this._archiveInterval) {
+      clearInterval(this._archiveInterval);
+      this._archiveInterval = null;
+    }
+
+    const getter = typeof getStocksMap === 'function' ? getStocksMap : this._getStocksMap;
+    if (!getter) return;
+
+    // Catch-up if server boots after close with today's freeze still in memory
+    try {
+      void this.ensureArchivedIfClosed(getter());
+    } catch (err) {
+      console.warn('[OpeningMomentumService] Initial archive check failed:', err.message);
+    }
+
+    const armArchive = () => {
+      const delay = this.msUntilNextArchive();
+      console.log(
+        `[OpeningMomentumService] Next EOD archive in ${Math.round(delay / 1000)}s.`
+      );
+      this._archiveTimer = setTimeout(() => {
+        try {
+          const stocks = getter();
+          void this.archiveSession(stocks, { source: 'auto_eod' });
+        } catch (err) {
+          console.warn('[OpeningMomentumService] Scheduled archive failed:', err.message);
+        }
+        armArchive();
+      }, delay);
+      if (typeof this._archiveTimer.unref === 'function') this._archiveTimer.unref();
+    };
+
+    armArchive();
+
+    this._archiveInterval = setInterval(() => {
+      try {
+        void this.ensureArchivedIfClosed(getter());
+      } catch {
+        // ignore
+      }
+    }, ARCHIVE_POLL_MS);
+    if (typeof this._archiveInterval.unref === 'function') this._archiveInterval.unref();
+  }
+
+  async getHistorySnapshot(sessionDate) {
+    if (!sessionDate || !/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) {
+      return null;
+    }
+    return OpeningMomentumDailySnapshot.findOne({ sessionDate }).lean();
+  }
+
+  async getLatestHistorySnapshot() {
+    return OpeningMomentumDailySnapshot.findOne({}).sort({ sessionDate: -1 }).lean();
+  }
+
+  async listHistoryDates(limit = 30) {
+    const docs = await OpeningMomentumDailySnapshot.find({})
+      .sort({ sessionDate: -1 })
+      .limit(Math.min(90, Math.max(1, Number(limit) || 30)))
+      .select('sessionDate savedAt source stats.eod')
+      .lean();
+    return docs.map((d) => ({
+      sessionDate: d.sessionDate,
+      savedAt: d.savedAt,
+      source: d.source,
+      eod: d.stats?.eod || null
+    }));
+  }
+
+  formatHistoryPayload(doc) {
+    if (!doc) return null;
+    return {
+      mode: 'history',
+      sessionDate: doc.sessionDate,
+      enabled: true,
+      isFrozen: true,
+      frozenAt: doc.frozenAt,
+      frozenSessionDate: doc.sessionDate,
+      freezeTime: doc.freezeTime || '09:20',
+      topCount: doc.topCount,
+      minRvol: doc.minRvol,
+      breakoutOnly: doc.breakoutOnly,
+      gainers: doc.gainers || [],
+      losers: doc.losers || [],
+      breadth: doc.breadth || {},
+      stats: doc.stats || {},
+      source: doc.source,
+      savedAt: doc.savedAt,
+      timestamp: doc.savedAt ? new Date(doc.savedAt).getTime() : Date.now(),
+      waitingForPrices: false,
+      message: `EOD preview for ${doc.sessionDate} — simulated P&L from ${doc.freezeTime || '09:20'} → close.`
+    };
   }
 
   /**
@@ -354,9 +687,12 @@ export class OpeningMomentumService {
       return null;
     }
 
-    // New session before freeze time → drop yesterday's lock
+    // New session before freeze time → archive prior day if missed, then drop lock
     if (parts.minuteOfDay < freezeMins) {
       if (this.frozenSessionDate && this.frozenSessionDate !== parts.dateKey) {
+        if (this._archivedSessionDate !== this.frozenSessionDate && stocksMap) {
+          void this.archiveSession(stocksMap, { source: 'auto_eod' });
+        }
         this.clearFreeze(`new session ${parts.dateKey} before freeze time`);
       }
       return null;
@@ -444,6 +780,9 @@ export class OpeningMomentumService {
     }, ENSURE_POLL_MS);
 
     if (typeof this._ensureInterval.unref === 'function') this._ensureInterval.unref();
+
+    // EOD archive: save rankings at market close for next-day preview
+    this.startArchiveScheduler(this._getStocksMap);
   }
 
   stopScheduler() {
@@ -454,6 +793,14 @@ export class OpeningMomentumService {
     if (this._ensureInterval) {
       clearInterval(this._ensureInterval);
       this._ensureInterval = null;
+    }
+    if (this._archiveTimer) {
+      clearTimeout(this._archiveTimer);
+      this._archiveTimer = null;
+    }
+    if (this._archiveInterval) {
+      clearInterval(this._archiveInterval);
+      this._archiveInterval = null;
     }
   }
 

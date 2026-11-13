@@ -48,16 +48,48 @@ const paymentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['created', 'paid', 'failed'],
+      // pending = UTR submitted, waiting for admin verification
+      enum: ['created', 'pending', 'paid', 'failed'],
       default: 'created',
+      index: true
+    },
+    /** razorpay | utr */
+    gateway: {
+      type: String,
+      enum: ['razorpay', 'utr'],
+      default: 'razorpay',
       index: true
     },
     paymentMethod: {
       type: String,
       default: null
     },
+    /** Unique Transaction Reference for manual UPI/bank payments */
+    utr: {
+      type: String,
+      default: null,
+      trim: true,
+      uppercase: true,
+      index: true,
+      sparse: true
+    },
     failureReason: {
       type: String,
+      default: null
+    },
+    adminNote: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    reviewedAt: {
+      type: Date,
       default: null
     },
     /** Membership plan purchased with this payment */
@@ -91,5 +123,12 @@ const paymentSchema = new mongoose.Schema(
 
 paymentSchema.index({ 'customerDetails.email': 1 });
 paymentSchema.index({ createdAt: -1 });
+paymentSchema.index(
+  { utr: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { utr: { $type: 'string' } }
+  }
+);
 
 export const Payment = mongoose.model('Payment', paymentSchema);

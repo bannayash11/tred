@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Lock, Mail, KeyRound, AlertCircle, ArrowRight } from 'lucide-react';
+import { Lock, Mail, KeyRound, AlertCircle, ArrowRight } from 'lucide-react';
 import { api } from '../services/api';
+import Panel from './ui/Panel';
 
 export default function AdminLoginView({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
@@ -9,11 +10,9 @@ export default function AdminLoginView({ onLoginSuccess }) {
   const [error, setError] = useState('');
   const [requires2fa, setRequires2fa] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-
-  // Forgot Password Modal State
-  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [recoveryStep, setRecoveryStep] = useState(1); // 1: request code, 2: enter code & new pass
+  const [recoveryStep, setRecoveryStep] = useState(1);
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [recoveryNotice, setRecoveryNotice] = useState('');
@@ -52,14 +51,10 @@ export default function AdminLoginView({ onLoginSuccess }) {
         localStorage.setItem('tred_admin_user', JSON.stringify(res.data.user));
         onLoginSuccess(res.data.user, res.data.token);
       } else {
-        setError(res.data.message || 'Invalid email or password. Please check your details.');
+        setError(res.data.message || 'Invalid email or password.');
       }
     } catch (err) {
-      setError(
-        err.userMessage ||
-          err.response?.data?.message ||
-          'Invalid email or password. Please check your details.'
-      );
+      setError(err.userMessage || err.response?.data?.message || 'Invalid email or password.');
     } finally {
       setLoading(false);
     }
@@ -77,14 +72,12 @@ export default function AdminLoginView({ onLoginSuccess }) {
     try {
       const res = await api.post('/auth/forgot-password', { email: normalized });
       if (res.data.success) {
-        setRecoveryNotice(res.data.message || 'Use OTP 0000 to reset your password.');
-        setRecoveryCode(res.data.otp || '0000');
+        setRecoveryNotice(res.data.message || 'If that account exists, an OTP was emailed.');
+        if (res.data.otp) setRecoveryCode(res.data.otp);
         setRecoveryStep(2);
       }
     } catch (err) {
-      setError(
-        err.userMessage || err.response?.data?.message || 'Could not send recovery code. Please try again.'
-      );
+      setError(err.userMessage || err.response?.data?.message || 'Could not send recovery code.');
     }
   };
 
@@ -92,7 +85,7 @@ export default function AdminLoginView({ onLoginSuccess }) {
     e.preventDefault();
     setError('');
     if (!String(recoveryCode || '').trim()) {
-      setError('Please enter the recovery OTP (0000).');
+      setError('Please enter the recovery OTP.');
       return;
     }
     if (!newPassword || newPassword.length < 6) {
@@ -106,75 +99,59 @@ export default function AdminLoginView({ onLoginSuccess }) {
         newPassword
       });
       if (res.data.success) {
-        alert('Admin password has been reset successfully! Please sign in.');
-        setShowForgotModal(false);
+        setShowForgot(false);
         setRecoveryStep(1);
         setPassword(newPassword);
         setError('');
+        setRecoveryNotice('');
       } else {
-        setError(res.data.message || 'Could not reset password. Please check your details.');
+        setError(res.data.message || 'Could not reset password.');
       }
     } catch (err) {
-      setError(
-        err.userMessage || err.response?.data?.message || 'Could not reset password. Please check your details.'
-      );
+      setError(err.userMessage || err.response?.data?.message || 'Could not reset password.');
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#070b14] flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Background glow */}
-      <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[500px] w-[500px] rounded-full bg-amber-500/10 blur-[130px]" />
+    <div className="relative flex min-h-screen items-center justify-center bg-admin-bg p-4">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(76,201,192,0.12),_transparent_55%)]" />
 
-      <div className="relative w-full max-w-md rounded-3xl border border-amber-900/40 bg-slate-900/90 p-8 shadow-2xl backdrop-blur-2xl space-y-6">
-        {/* Brand Shield Header */}
-        <div className="text-center space-y-2">
-          <img
-            src="/brand/tradrift-logo.svg"
-            alt="Tradrift"
-            className="mx-auto h-14 w-14 rounded-2xl shadow-lg shadow-amber-500/20"
-          />
-          <h1 className="text-xl font-extrabold tracking-tight text-white">
-            Trad<span className="text-amber-400">rift</span> SUPER ADMIN
+      <Panel className="relative w-full max-w-md space-y-6 p-6 sm:p-8">
+        <div className="space-y-2 text-center">
+          <img src="/brand/tradrift-logo.svg" alt="Tradrift" className="mx-auto h-12 w-12 rounded-xl" />
+          <h1 className="text-xl font-semibold text-white">
+            Trad<span className="text-admin-accent">rift</span> Admin
           </h1>
-          <p className="text-xs text-slate-400">
-            Restricted Master Control Gateway. Authorized Administrators Only.
-          </p>
+          <p className="text-sm text-admin-muted">Sign in to manage traders, plans, and content.</p>
         </div>
 
         {error && requires2fa && (
-          <div className="rounded-xl bg-rose-950/80 border border-rose-800/50 p-3 text-xs text-rose-300 flex items-center space-x-2">
+          <div className="flex items-center gap-2 rounded-lg border border-rose-800/50 bg-rose-950/60 p-3 text-xs text-rose-300">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Login Form */}
-        <form onSubmit={handleAdminLogin} className="space-y-4 text-xs" noValidate>
+        <form onSubmit={handleAdminLogin} className="space-y-4" noValidate>
           {requires2fa ? (
             <div>
-              <label className="text-slate-400 block mb-1">2FA Verification Code</label>
+              <label className="admin-label">2FA code</label>
               <div className="relative">
-                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-muted" />
                 <input
                   type="text"
                   inputMode="numeric"
                   required
-                  maxLength={4}
+                  maxLength={6}
                   value={otpCode}
                   onChange={(e) => {
-                    setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 4));
+                    setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
                     if (error) setError('');
                   }}
-                  placeholder="0000"
-                  className={`w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border focus:outline-none tracking-widest ${
-                    error ? 'border-rose-600 focus:border-rose-500' : 'border-slate-800 focus:border-amber-500'
-                  }`}
+                  placeholder="6-digit OTP"
+                  className="admin-input pl-9 tracking-widest"
                 />
               </div>
-              <p className="mt-1.5 text-[10px] text-slate-500">
-                Default OTP for now: <span className="font-mono text-amber-400">0000</span>
-              </p>
               <button
                 type="button"
                 onClick={() => {
@@ -182,54 +159,49 @@ export default function AdminLoginView({ onLoginSuccess }) {
                   setOtpCode('');
                   setError('');
                 }}
-                className="mt-2 text-amber-400 hover:underline text-[11px]"
+                className="mt-2 text-xs text-admin-accent hover:underline"
               >
-                ← Back to password
+                Back to password
               </button>
             </div>
           ) : (
             <>
               <div>
-                <label className="text-slate-400 block mb-1">Admin Email Address</label>
+                <label className="admin-label">Email</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-muted" />
                   <input
                     type="email"
                     required
                     autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value.toLowerCase());
                       if (error) setError('');
                     }}
                     placeholder="admin@example.com"
-                    className={`w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border focus:outline-none ${
-                      error ? 'border-rose-600 focus:border-rose-500' : 'border-slate-800 focus:border-amber-500'
-                    }`}
+                    className="admin-input pl-9"
                   />
                 </div>
-                <p className="mt-1 text-[10px] text-slate-500">Email is not case-sensitive (Y and y are the same).</p>
               </div>
 
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-slate-400">Master Password</label>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-xs font-medium text-admin-muted">Password</label>
                   <button
                     type="button"
                     onClick={() => {
                       setForgotEmail(email);
-                      setShowForgotModal(true);
+                      setShowForgot(true);
                       setError('');
                     }}
-                    className="text-amber-400 hover:underline text-[11px]"
+                    className="text-xs text-admin-accent hover:underline"
                   >
-                    Forgot Password?
+                    Forgot password?
                   </button>
                 </div>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-muted" />
                   <input
                     type="password"
                     required
@@ -238,55 +210,38 @@ export default function AdminLoginView({ onLoginSuccess }) {
                       setPassword(e.target.value);
                       if (error) setError('');
                     }}
-                    placeholder="••••••••••••"
-                    className={`w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border focus:outline-none ${
-                      error ? 'border-rose-600 focus:border-rose-500' : 'border-slate-800 focus:border-amber-500'
-                    }`}
+                    placeholder="••••••••"
+                    className="admin-input pl-9"
                   />
                 </div>
-                {error && (
-                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{error}</p>
-                )}
+                {error && <p className="mt-1.5 text-xs text-rose-400">{error}</p>}
               </div>
             </>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex w-full items-center justify-center space-x-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 py-3 text-xs font-bold text-black hover:opacity-95 transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
-          >
+          <button type="submit" disabled={loading} className="admin-btn-primary w-full py-2.5">
             {loading ? (
-              <span>Verifying Credentials...</span>
+              'Signing in...'
             ) : (
               <>
-                <span>{requires2fa ? 'Verify & Access Console' : 'Authenticate & Access Console'}</span>
+                {requires2fa ? 'Verify' : 'Sign in'}
                 <ArrowRight className="h-4 w-4" />
               </>
             )}
           </button>
         </form>
+      </Panel>
 
-        {/* Security Notice */}
-        <div className="border-t border-slate-800/80 pt-4 text-center text-[11px] text-slate-500">
-          🛡️ Session guarded by SHA-256 JWT & IP Activity Auditing.
-        </div>
-      </div>
-
-      {/* Forgot Password Recovery Modal */}
-      {showForgotModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
-          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-[#0a0f1d] p-6 shadow-2xl space-y-4 text-xs">
-            <h3 className="text-sm font-bold text-white flex items-center">
-              <KeyRound className="mr-2 h-4 w-4 text-amber-400" />
-              Administrator Security Recovery
+      {showForgot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <Panel className="w-full max-w-md space-y-4 p-5">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+              <KeyRound className="h-4 w-4 text-admin-accent" />
+              Reset password
             </h3>
-            <p className="text-slate-400">
-              Recover access using the authorized admin email address.
-            </p>
 
             {recoveryNotice && (
-              <div className="rounded-xl bg-emerald-950/80 border border-emerald-800/50 p-2.5 text-emerald-400 font-mono">
+              <div className="rounded-lg border border-emerald-800/50 bg-emerald-950/60 p-2.5 font-mono text-xs text-emerald-300">
                 {recoveryNotice}
               </div>
             )}
@@ -294,7 +249,7 @@ export default function AdminLoginView({ onLoginSuccess }) {
             {recoveryStep === 1 ? (
               <form onSubmit={handleRequestRecovery} className="space-y-3">
                 <div>
-                  <label className="text-slate-400 block mb-1">Admin Email</label>
+                  <label className="admin-label">Admin email</label>
                   <input
                     type="email"
                     required
@@ -303,89 +258,68 @@ export default function AdminLoginView({ onLoginSuccess }) {
                       setForgotEmail(e.target.value.toLowerCase());
                       if (error) setError('');
                     }}
-                    className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${
-                      error ? 'border-rose-600' : 'border-slate-800'
-                    }`}
+                    className="admin-input"
                   />
-                  {error && recoveryStep === 1 && (
-                    <p className="mt-1.5 text-[11px] font-medium text-rose-400">{error}</p>
-                  )}
+                  {error && <p className="mt-1.5 text-xs text-rose-400">{error}</p>}
                 </div>
-                <div className="flex justify-end space-x-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotModal(false)}
-                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-slate-300"
-                  >
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowForgot(false)} className="admin-btn-secondary">
                     Cancel
                   </button>
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-amber-500 px-4 py-1.5 font-bold text-black"
-                  >
-                    Send Recovery Code
+                  <button type="submit" className="admin-btn-primary">
+                    Send code
                   </button>
                 </div>
               </form>
             ) : (
               <form onSubmit={handleResetPassword} className="space-y-3">
                 <div>
-                  <label className="text-slate-400 block mb-1">Recovery OTP</label>
+                  <label className="admin-label">Recovery OTP</label>
                   <input
                     type="text"
                     inputMode="numeric"
                     required
-                    maxLength={4}
-                    placeholder="0000"
+                    maxLength={6}
                     value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    className="w-full rounded-xl bg-slate-950 p-2.5 font-mono text-white border border-slate-800 text-center tracking-widest text-sm"
+                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="6-digit OTP"
+                    className="admin-input text-center font-mono tracking-widest"
                   />
-                  <p className="mt-1.5 text-[10px] text-slate-500">Default OTP for now: <span className="font-mono text-amber-400">0000</span></p>
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1">New Administrator Password</label>
+                  <label className="admin-label">New password</label>
                   <input
                     type="password"
                     required
-                    placeholder="Min 6 characters"
                     value={newPassword}
                     onChange={(e) => {
                       setNewPassword(e.target.value);
                       if (error) setError('');
                     }}
-                    className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${
-                      error ? 'border-rose-600' : 'border-slate-800'
-                    }`}
+                    className="admin-input"
                   />
-                  {error && recoveryStep === 2 && (
-                    <p className="mt-1.5 text-[11px] font-medium text-rose-400">{error}</p>
-                  )}
+                  {error && <p className="mt-1.5 text-xs text-rose-400">{error}</p>}
                 </div>
-                <div className="flex justify-end space-x-2 pt-2">
+                <div className="flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      setShowForgotModal(false);
+                      setShowForgot(false);
                       setError('');
                     }}
-                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-slate-300"
+                    className="admin-btn-secondary"
                   >
                     Cancel
                   </button>
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-emerald-500 px-4 py-1.5 font-bold text-black"
-                  >
-                    Confirm & Reset Password
+                  <button type="submit" className="admin-btn-primary">
+                    Reset password
                   </button>
                 </div>
               </form>
             )}
-          </div>
+          </Panel>
         </div>
       )}
     </div>
   );
 }
-

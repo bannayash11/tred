@@ -64,9 +64,6 @@ export const getSocket = () => {
 };
 
 export const fetchScreener = () => api.get('/screener/live').then((res) => res.data);
-export const fetchMarketXRay = () => api.get('/screener/market-xray').then((res) => res.data);
-export const fetchStock = (symbol) => api.get(`/screener/stock/${symbol}`).then((res) => res.data);
-export const fetchPublicAnnouncement = () => api.get('/admin/public-announcement').then((res) => res.data);
 
 export const fetchAdminData = () => api.get('/admin/overview').then((res) => res.data);
 export const updateUserSub = (id, data) => api.post(`/admin/users/${id}/subscription`, data).then((res) => res.data);
@@ -75,12 +72,20 @@ export const updateAnnouncementConfig = (data) => api.post('/admin/settings/anno
 export const updateByokSalesConfig = (data) => api.post('/admin/settings/byok', data).then((res) => res.data);
 export const updateFreeTrialConfig = (data) =>
   api.post('/admin/settings/free-trial', data).then((res) => res.data);
+export const updatePaymentMethodsConfig = (data) =>
+  api.post('/admin/settings/payments', data).then((res) => res.data);
+export const updateUtrPayConfig = (data) =>
+  api.post('/admin/settings/utr-config', data).then((res) => res.data);
+export const uploadUtrQrImage = (data) =>
+  api.post('/admin/settings/utr-qr-upload', data).then((res) => res.data);
 
 // Opening 5-Minute Momentum Scanner API
 export const fetchOpeningMomentumSettings = () => api.get('/admin/opening-momentum/settings').then((res) => res.data);
 export const updateOpeningMomentumSettings = (data) => api.put('/admin/opening-momentum/settings', data).then((res) => res.data);
 export const triggerOpeningMomentumFreeze = () => api.post('/admin/opening-momentum/trigger-freeze').then((res) => res.data);
 export const resetOpeningMomentumSession = () => api.post('/admin/opening-momentum/reset').then((res) => res.data);
+export const archiveOpeningMomentumSession = (force = false) =>
+  api.post('/admin/opening-momentum/archive', { force }).then((res) => res.data);
 export const fetchOpeningMomentumLive = () => api.get('/screener/opening-momentum').then((res) => res.data);
 
 export const fetchSeoAdminPages = () => api.get('/seo/admin/pages').then((res) => res.data);
@@ -88,11 +93,41 @@ export const updateSeoAdminPage = (pageKey, data) =>
   api.put(`/seo/admin/pages/${pageKey}`, data).then((res) => res.data);
 export const seedSeoAdminPages = () => api.post('/seo/admin/seed').then((res) => res.data);
 
-export const loginApi = (data) => api.post('/auth/login', data).then((res) => res.data);
 export const adminLoginApi = (data) => api.post('/auth/admin-login', data).then((res) => res.data);
-export const registerApi = (data) => api.post('/auth/register', data).then((res) => res.data);
 export const getMe = () => api.get('/auth/me').then((res) => res.data);
 
-/** Razorpay admin payment tracking */
+/** Razorpay + UTR admin payment tracking */
 export const fetchAdminPayments = (params = {}) =>
   api.get('/payment/admin/all', { params }).then((res) => res.data);
+export const importAdminPaymentsApi = (payments) =>
+  api.post('/payment/admin/import', { payments }).then((res) => res.data);
+export const approveUtrPaymentApi = (id, data = {}) =>
+  api.post(`/payment/admin/${id}/approve-utr`, data).then((res) => res.data);
+export const rejectUtrPaymentApi = (id, data = {}) =>
+  api.post(`/payment/admin/${id}/reject-utr`, data).then((res) => res.data);
+
+export const importAdminUsersApi = (users) =>
+  api.post('/admin/users/import', { users }).then((res) => res.data);
+
+export const fetchSmtpSettingsApi = () =>
+  api.get('/admin/settings/smtp').then((res) => res.data);
+export const saveSmtpSettingsApi = (data) =>
+  api.post('/admin/settings/smtp', data).then((res) => res.data);
+export const testSmtpSettingsApi = (data) =>
+  api.post('/admin/settings/smtp/test', data).then((res) => res.data);
+
+export const fetchEmailTemplatesApi = () =>
+  api.get('/admin/settings/email-templates').then((res) => res.data);
+export const saveEmailTemplateApi = (key, data) =>
+  api.put(`/admin/settings/email-templates/${key}`, data).then((res) => res.data);
+export const resetEmailTemplateApi = (key) =>
+  api.post(`/admin/settings/email-templates/${key}/reset`).then((res) => res.data);
+export const previewEmailTemplateApi = (key) =>
+  api.post(`/admin/settings/email-templates/${key}/preview`).then((res) => res.data);
+
+export const fetchSocialSettingsApi = () =>
+  api.get('/admin/settings/social').then((res) => res.data);
+export const saveSocialSettingsApi = (data) =>
+  api.post('/admin/settings/social', data).then((res) => res.data);
+export const fetchPublicSocialApi = () =>
+  api.get('/admin/public-social').then((res) => res.data);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap,
   Lock,
@@ -9,9 +9,17 @@ import {
   ExternalLink,
   ArrowUpRight,
   ArrowDownRight,
-  Scale
+  Scale,
+  History,
+  CalendarDays
 } from 'lucide-react';
-import { fetchOpeningMomentum, getSocket } from '../services/api';
+import {
+  fetchOpeningMomentum,
+  fetchOpeningMomentumHistory,
+  fetchOpeningMomentumHistoryDates,
+  fetchOpeningMomentumHistoryLatest,
+  getSocket
+} from '../services/api';
 import { useSelector } from 'react-redux';
 import { getMembership } from '../lib/membership';
 
@@ -39,15 +47,75 @@ export default function OpeningMomentumScanner({
   const [selectedSector, setSelectedSector] = useState('ALL');
   const [viewMode, setViewMode] = useState('ALL'); // 'ALL' | 'BREAKOUTS' | 'HIGH_RVOL'
   const [activeTab, setActiveTab] = useState('DUAL'); // 'DUAL' | 'GAINERS' | 'LOSERS'
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [updateIntervalSec, setUpdateIntervalSec] = useState(null);
+  const prevTickAtRef = React.useRef(null);
+
+  // Live vs next-day EOD preview
+  const [boardMode, setBoardMode] = useState('LIVE'); // 'LIVE' | 'PREVIEW'
+  const [historyDates, setHistoryDates] = useState([]);
+  const [previewDate, setPreviewDate] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const boardModeRef = React.useRef(boardMode);
+
+  const markUpdate = useCallback((payload) => {
+    const ts = Number(payload?.timestamp) || Date.now();
+    const prev = prevTickAtRef.current;
+    if (prev && ts > prev) {
+      const gapSec = Math.max(1, Math.round((ts - prev) / 1000));
+      setUpdateIntervalSec(gapSec);
+    }
+    prevTickAtRef.current = ts;
+    setLastUpdatedAt(ts);
+  }, []);
+
+  const loadPreview = useCallback(
+    async (date) => {
+      setPreviewLoading(true);
+      setLoadError('');
+      try {
+        const res = date
+          ? await fetchOpeningMomentumHistory(date)
+          : await fetchOpeningMomentumHistoryLatest();
+        if (res.success && res.data) {
+          setData(res.data);
+          setPreviewDate(res.data.sessionDate || date || '');
+          markUpdate(res.data);
+        } else {
+          setLoadError(res.message || 'No archived session found.');
+        }
+      } catch (err) {
+        setLoadError(
+          err.userMessage ||
+            err.response?.data?.message ||
+            'Could not load previous day preview. Archive runs after market close.'
+        );
+      } finally {
+        setPreviewLoading(false);
+        setLoading(false);
+      }
+    },
+    [markUpdate]
+  );
 
   useEffect(() => {
     let isMounted = true;
+
+    fetchOpeningMomentumHistoryDates(30)
+      .then((res) => {
+        if (isMounted && res.success && Array.isArray(res.dates)) {
+          setHistoryDates(res.dates);
+        }
+      })
+      .catch(() => {});
 
     // Fetch initial REST snapshot
     fetchOpeningMomentum()
       .then((res) => {
         if (isMounted && res.success && res.data) {
           setData(res.data);
+          markUpdate(res.data);
           setLoadError('');
           setLoading(false);
         } else if (isMounted) {
@@ -62,14 +130,15 @@ export default function OpeningMomentumScanner({
         }
       });
 
-    // Listen to real-time socket ticks
+    // Listen to real-time socket ticks (only apply while on LIVE board)
     const socket = getSocket();
     const handleMomentumTick = (payload) => {
-      if (isMounted && payload) {
-        setData(payload);
-        setLoadError('');
-        setLoading(false);
-      }
+      if (!isMounted || !payload) return;
+      if (boardModeRef.current !== 'LIVE') return;
+      setData(payload);
+      markUpdate(payload);
+      setLoadError('');
+      setLoading(false);
     };
 
     socket.on('OPENING_MOMENTUM', handleMomentumTick);
@@ -78,7 +147,46 @@ export default function OpeningMomentumScanner({
       isMounted = false;
       socket.off('OPENING_MOMENTUM', handleMomentumTick);
     };
+  }, [markUpdate]);
+
+  useEffect(() => {
+    boardModeRef.current = boardMode;
+  }, [boardMode]);
+
+  useEffect(() => {
+    if (boardMode === 'PREVIEW') {
+      fetchOpeningMomentumHistoryDates(30)
+        .then((res) => {
+          if (res.success && Array.isArray(res.dates)) setHistoryDates(res.dates);
+        })
+        .catch(() => {});
+      loadPreview(previewDate || undefined);
+    } else {
+      setLoading(true);
+      fetchOpeningMomentum()
+        .then((res) => {
+          if (res.success && res.data) {
+            setData(res.data);
+            markUpdate(res.data);
+            setLoadError('');
+          }
+        })
+        .catch((err) => {
+          setLoadError(err.userMessage || 'Could not load opening momentum.');
+        })
+        .finally(() => setLoading(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on boardMode switch
+  }, [boardMode]);
+
+  // Tick every second so "Xs ago" stays fresh
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
   }, []);
+
+  const isPreview = boardMode === 'PREVIEW';
+  const eodStats = data.stats?.eod || null;
 
   const sectors = ['ALL', 'Banking', 'IT', 'Auto', 'Energy', 'Metals', 'Pharma', 'Financials'];
 
@@ -108,19 +216,38 @@ export default function OpeningMomentumScanner({
   const displayLosers = filteredLosers;
 
   const formatFreezeTime = (iso) => {
-    if (!iso) return '09:20:00 AM IST';
+    if (!iso) return data.freezeTime || '09:20';
     try {
       return new Date(iso).toLocaleTimeString('en-IN', {
         timeZone: 'Asia/Kolkata',
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-      }) + ' IST';
+        hour12: false
+      });
     } catch {
-      return '09:20:00 AM IST';
+      return data.freezeTime || '09:20';
     }
   };
+
+  /** Relative age of last live tick (seconds / minutes). */
+  const formatSecondsAgo = (ts) => {
+    if (!ts) return null;
+    const sec = Math.max(0, Math.floor((nowMs - ts) / 1000));
+    if (sec < 1) return 'just now';
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    return `${Math.floor(min / 60)}h ago`;
+  };
+
+  const freezeLabel = data.isFrozen
+    ? formatFreezeTime(data.frozenAt)
+    : data.freezeTime || '09:20';
+  const lastAgo = formatSecondsAgo(lastUpdatedAt);
+  const refreshLabel =
+    updateIntervalSec != null
+      ? `every ~${updateIntervalSec}s`
+      : 'live ticks';
 
   // 5-Minute F&O Market Breadth calculated against 09:20 Reference Close
   const breadth = data.breadth || data.stats?.breadth || (() => {
@@ -148,6 +275,20 @@ export default function OpeningMomentumScanner({
     };
   })();
 
+  const formatPnl = (pct, pts) => {
+    const p = Number(pct);
+    if (!Number.isFinite(p)) return { label: '—', cls: 'text-slate-400' };
+    const sign = p > 0 ? '+' : '';
+    return {
+      label: `${sign}${p.toFixed(2)}%`,
+      pts:
+        Number.isFinite(Number(pts))
+          ? `${Number(pts) > 0 ? '+' : ''}₹${Number(pts).toFixed(1)}`
+          : null,
+      cls: p > 0.05 ? 'text-emerald-400' : p < -0.05 ? 'text-rose-400' : 'text-slate-300'
+    };
+  };
+
   return (
     <div className="space-y-4">
       {loadError && (
@@ -155,27 +296,116 @@ export default function OpeningMomentumScanner({
           {loadError}
         </div>
       )}
+
+      {/* Live / Preview mode switch */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800/70 bg-slate-900/40 px-3 py-2">
+        <div className="flex items-center rounded-lg bg-slate-950/80 p-0.5 border border-slate-800">
+          <button
+            type="button"
+            onClick={() => setBoardMode('LIVE')}
+            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all ${
+              !isPreview ? 'bg-emerald-500 text-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Live
+          </button>
+          <button
+            type="button"
+            onClick={() => setBoardMode('PREVIEW')}
+            className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all ${
+              isPreview ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <History className="h-3 w-3" />
+            Previous day
+          </button>
+        </div>
+
+        {isPreview && (
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            <CalendarDays className="h-3.5 w-3.5 text-violet-300" />
+            <select
+              value={previewDate}
+              onChange={(e) => {
+                const d = e.target.value;
+                setPreviewDate(d);
+                loadPreview(d);
+              }}
+              disabled={previewLoading || historyDates.length === 0}
+              className="rounded-md bg-slate-950 border border-slate-700 px-2 py-1 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-violet-500"
+            >
+              {historyDates.length === 0 ? (
+                <option value="">No archives yet</option>
+              ) : (
+                historyDates.map((d) => (
+                  <option key={d.sessionDate} value={d.sessionDate}>
+                    {d.sessionDate}
+                    {d.eod?.gainerHitRate != null ? ` · hit ${d.eod.gainerHitRate}%` : ''}
+                  </option>
+                ))
+              )}
+            </select>
+            {eodStats && (
+              <span className="text-[10px] text-slate-400 font-mono">
+                Long hit <span className="text-emerald-400 font-semibold">{eodStats.gainerHitRate ?? 0}%</span>
+                {' · '}
+                Short hit <span className="text-rose-400 font-semibold">{eodStats.loserHitRate ?? 0}%</span>
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isPreview && (
+        <div className="rounded-xl border border-violet-800/50 bg-violet-950/30 px-3 py-2 text-[11px] text-violet-200/90">
+          EOD preview for <span className="font-mono font-semibold text-white">{previewDate || '—'}</span>
+          {' — '}simulated P&amp;L if you followed Top gainers (long) / Top losers (short) from{' '}
+          {data.freezeTime || '09:20'} → market close. Educational only, not advice.
+        </div>
+      )}
+
       {/* Compact scanner summary — single dense strip */}
       <div className="rounded-lg border border-slate-800/70 bg-slate-900/40 px-3 py-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <div className="flex items-center gap-1.5 min-w-0">
             <Zap className="h-3.5 w-3.5 shrink-0 text-amber-400" />
             <h2 className="text-[12px] font-semibold text-white">5m Momentum</h2>
-            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1 py-0.5 text-[9px] font-bold text-emerald-400">
-              <span className="h-1 w-1 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE
-            </span>
+            {isPreview ? (
+              <span className="inline-flex items-center gap-1 rounded bg-violet-500/15 px-1 py-0.5 text-[9px] font-bold text-violet-300">
+                PREVIEW
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1 py-0.5 text-[9px] font-bold text-emerald-400">
+                <span className="h-1 w-1 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono ml-auto sm:ml-0">
             <span className="text-slate-500">Universe <span className="text-white font-semibold">{data.stats?.totalTracked || 35}</span></span>
             <span className="text-slate-500">Avg up <span className="text-emerald-400 font-semibold">{data.stats?.avgGainerMove || '+0.00%'}</span></span>
             <span className="text-slate-500">Avg down <span className="text-rose-400 font-semibold">{data.stats?.avgLoserMove || '-0.00%'}</span></span>
           </div>
-          <div className="inline-flex items-center gap-1 text-[10px] text-slate-400 ml-auto">
+          <div
+            className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-400 ml-auto"
+            title={
+              isPreview
+                ? `Archived EOD snapshot for ${previewDate}`
+                : `09:20 reference freeze · rankings refresh on live ticks (${refreshLabel})`
+            }
+          >
             <Lock className="h-3 w-3 text-cyan-400" />
-            <span className="font-mono text-cyan-300">
-              {data.isFrozen ? formatFreezeTime(data.frozenAt) : '09:20'}
-            </span>
+            <span className="font-mono text-cyan-300">{freezeLabel}</span>
+            {!isPreview && <span className="text-slate-500">· {refreshLabel}</span>}
+            {!isPreview && lastAgo && (
+              <span className="text-slate-500 font-medium">· Updated {lastAgo}</span>
+            )}
+            {isPreview && data.savedAt && (
+              <span className="text-slate-500 font-medium">
+                · Saved{' '}
+                {new Date(data.savedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -305,7 +535,9 @@ export default function OpeningMomentumScanner({
                   <span className="text-xs text-slate-400 font-normal">· Bullish Velocity</span>
                 </h3>
                 <div className="text-[10px] text-slate-400">
-                  Ranked by % move from 09:20 Reference Close
+                  {isPreview
+                    ? 'EOD result · long from 09:20 → close'
+                    : 'Ranked by % move from 09:20 Reference Close'}
                 </div>
               </div>
             </div>
@@ -321,24 +553,32 @@ export default function OpeningMomentumScanner({
                 <tr className="border-b border-slate-800/80 text-[10px] uppercase tracking-wider text-slate-400">
                   <th className="py-2.5 px-2">#</th>
                   <th className="py-2.5 px-2">Stock</th>
-                  <th className="py-2.5 px-2 text-right">LTP</th>
+                  <th className="py-2.5 px-2 text-right">{isPreview ? 'Close' : 'LTP'}</th>
                   <th className="py-2.5 px-2 text-right">09:20 Close</th>
                   <th className="py-2.5 px-2 text-right">From 9:20</th>
-                  <th className="py-2.5 px-2 text-center">RVOL</th>
-                  <th className="py-2.5 px-2 text-center">Status</th>
+                  {isPreview && <th className="py-2.5 px-2 text-right">Sim P&amp;L</th>}
+                  {isPreview && <th className="py-2.5 px-2 text-center">Result</th>}
+                  {!isPreview && <th className="py-2.5 px-2 text-center">RVOL</th>}
+                  {!isPreview && <th className="py-2.5 px-2 text-center">Status</th>}
                   <th className="py-2.5 px-2 text-center">Chart</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40 font-mono">
                 {displayGainers.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="py-8 text-center text-slate-500 font-sans">
-                      No bullish momentum stocks matching the current filter.
+                    <td colSpan={isPreview ? 8 : 8} className="py-8 text-center text-slate-500 font-sans">
+                      {isPreview
+                        ? 'No archived gainers for this date.'
+                        : 'No bullish momentum stocks matching the current filter.'}
                     </td>
                   </tr>
                 ) : (
                   displayGainers.map((stock) => {
-                    const isTickActive = liveUpdatedSymbols.has(stock.symbol);
+                    const isTickActive = !isPreview && liveUpdatedSymbols.has(stock.symbol);
+                    const pnl = formatPnl(
+                      stock.simPnlPercent ?? stock.closeMovementPercent ?? stock.movementPercent,
+                      stock.simPnlPoints ?? stock.closePointsChange ?? stock.pointsChange
+                    );
                     return (
                       <tr
                         key={stock.symbol}
@@ -368,46 +608,75 @@ export default function OpeningMomentumScanner({
                           </div>
                         </td>
                         <td className="py-3 px-2 text-right font-bold text-white">
-                          ₹{stock.ltp?.toLocaleString('en-IN')}
+                          ₹{(stock.closeLtp ?? stock.ltp)?.toLocaleString('en-IN')}
                         </td>
                         <td className="py-3 px-2 text-right text-slate-400 text-[11px]">
                           ₹{stock.refClose?.toLocaleString('en-IN')}
                         </td>
                         <td className="py-3 px-2 text-right">
                           <div className="font-extrabold text-emerald-400 text-xs sm:text-sm">
-                            +{stock.movementPercent?.toFixed(2)}%
+                            +{(stock.closeMovementPercent ?? stock.movementPercent)?.toFixed(2)}%
                           </div>
                           <div className="text-[10px] text-emerald-500/80">
-                            +₹{stock.pointsChange?.toFixed(1)}
+                            +₹{(stock.closePointsChange ?? stock.pointsChange)?.toFixed(1)}
                           </div>
                         </td>
-                        <td className="py-3 px-2 text-center">
-                          <span
-                            className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${stock.rvol >= 1.5
-                                ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
-                                : 'text-slate-400 bg-slate-900'
-                              }`}
-                          >
-                            {stock.rvol}x
-                          </span>
-                        </td>
-                        <td className="py-3 px-2 text-center font-sans">
-                          <span
-                            className={`inline-flex items-center space-x-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${stock.status === 'BREAKOUT'
-                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/80'
-                                : 'bg-slate-900 text-slate-400 border border-slate-800'
-                              }`}
-                          >
-                            {stock.status === 'BREAKOUT' ? (
-                              <>
-                                <Flame className="h-2.5 w-2.5 text-emerald-400" />
-                                <span>5M BREAKOUT</span>
-                              </>
-                            ) : (
-                              <span>INSIDE 5M</span>
+                        {isPreview && (
+                          <td className="py-3 px-2 text-right">
+                            <div className={`font-extrabold text-xs sm:text-sm ${pnl.cls}`}>
+                              {pnl.label}
+                            </div>
+                            {pnl.pts && (
+                              <div className={`text-[10px] ${pnl.cls} opacity-80`}>{pnl.pts}</div>
                             )}
-                          </span>
-                        </td>
+                          </td>
+                        )}
+                        {isPreview && (
+                          <td className="py-3 px-2 text-center font-sans">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold border ${
+                                stock.result === 'PROFIT'
+                                  ? 'bg-emerald-950 text-emerald-400 border-emerald-800/80'
+                                  : stock.result === 'LOSS'
+                                    ? 'bg-rose-950 text-rose-400 border-rose-800/80'
+                                    : 'bg-slate-900 text-slate-400 border-slate-800'
+                              }`}
+                            >
+                              {stock.result || '—'}
+                            </span>
+                          </td>
+                        )}
+                        {!isPreview && (
+                          <td className="py-3 px-2 text-center">
+                            <span
+                              className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${stock.rvol >= 1.5
+                                  ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
+                                  : 'text-slate-400 bg-slate-900'
+                                }`}
+                            >
+                              {stock.rvol}x
+                            </span>
+                          </td>
+                        )}
+                        {!isPreview && (
+                          <td className="py-3 px-2 text-center font-sans">
+                            <span
+                              className={`inline-flex items-center space-x-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${stock.status === 'BREAKOUT'
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/80'
+                                  : 'bg-slate-900 text-slate-400 border border-slate-800'
+                                }`}
+                            >
+                              {stock.status === 'BREAKOUT' ? (
+                                <>
+                                  <Flame className="h-2.5 w-2.5 text-emerald-400" />
+                                  <span>5M BREAKOUT</span>
+                                </>
+                              ) : (
+                                <span>INSIDE 5M</span>
+                              )}
+                            </span>
+                          </td>
+                        )}
                         <td className="py-3 px-2 text-center">
                           <button
                             type="button"
@@ -443,7 +712,9 @@ export default function OpeningMomentumScanner({
                   <span className="text-xs text-slate-400 font-normal">· Bearish Velocity</span>
                 </h3>
                 <div className="text-[10px] text-slate-400">
-                  Ranked by negative % move from 09:20 Reference Close
+                  {isPreview
+                    ? 'EOD result · short from 09:20 → close'
+                    : 'Ranked by negative % move from 09:20 Reference Close'}
                 </div>
               </div>
             </div>
@@ -459,11 +730,13 @@ export default function OpeningMomentumScanner({
                 <tr className="border-b border-slate-800/80 text-[10px] uppercase tracking-wider text-slate-400">
                   <th className="py-2.5 px-2">#</th>
                   <th className="py-2.5 px-2">Stock</th>
-                  <th className="py-2.5 px-2 text-right">LTP</th>
+                  <th className="py-2.5 px-2 text-right">{isPreview ? 'Close' : 'LTP'}</th>
                   <th className="py-2.5 px-2 text-right">09:20 Close</th>
                   <th className="py-2.5 px-2 text-right">From 9:20</th>
-                  <th className="py-2.5 px-2 text-center">RVOL</th>
-                  <th className="py-2.5 px-2 text-center">Status</th>
+                  {isPreview && <th className="py-2.5 px-2 text-right">Sim P&amp;L</th>}
+                  {isPreview && <th className="py-2.5 px-2 text-center">Result</th>}
+                  {!isPreview && <th className="py-2.5 px-2 text-center">RVOL</th>}
+                  {!isPreview && <th className="py-2.5 px-2 text-center">Status</th>}
                   <th className="py-2.5 px-2 text-center">Chart</th>
                 </tr>
               </thead>
@@ -471,12 +744,24 @@ export default function OpeningMomentumScanner({
                 {displayLosers.length === 0 ? (
                   <tr>
                     <td colSpan="8" className="py-8 text-center text-slate-500 font-sans">
-                      No bearish momentum stocks matching the current filter.
+                      {isPreview
+                        ? 'No archived losers for this date.'
+                        : 'No bearish momentum stocks matching the current filter.'}
                     </td>
                   </tr>
                 ) : (
                   displayLosers.map((stock) => {
-                    const isTickActive = liveUpdatedSymbols.has(stock.symbol);
+                    const isTickActive = !isPreview && liveUpdatedSymbols.has(stock.symbol);
+                    const pnl = formatPnl(
+                      stock.simPnlPercent ??
+                        (stock.closeMovementPercent != null
+                          ? -stock.closeMovementPercent
+                          : -(stock.movementPercent || 0)),
+                      stock.simPnlPoints ??
+                        (stock.closePointsChange != null
+                          ? -stock.closePointsChange
+                          : -(stock.pointsChange || 0))
+                    );
                     return (
                       <tr
                         key={stock.symbol}
@@ -506,46 +791,75 @@ export default function OpeningMomentumScanner({
                           </div>
                         </td>
                         <td className="py-3 px-2 text-right font-bold text-white">
-                          ₹{stock.ltp?.toLocaleString('en-IN')}
+                          ₹{(stock.closeLtp ?? stock.ltp)?.toLocaleString('en-IN')}
                         </td>
                         <td className="py-3 px-2 text-right text-slate-400 text-[11px]">
                           ₹{stock.refClose?.toLocaleString('en-IN')}
                         </td>
                         <td className="py-3 px-2 text-right">
                           <div className="font-extrabold text-rose-400 text-xs sm:text-sm">
-                            {stock.movementPercent?.toFixed(2)}%
+                            {(stock.closeMovementPercent ?? stock.movementPercent)?.toFixed(2)}%
                           </div>
                           <div className="text-[10px] text-rose-500/80">
-                            ₹{stock.pointsChange?.toFixed(1)}
+                            ₹{(stock.closePointsChange ?? stock.pointsChange)?.toFixed(1)}
                           </div>
                         </td>
-                        <td className="py-3 px-2 text-center">
-                          <span
-                            className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${stock.rvol >= 1.5
-                                ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
-                                : 'text-slate-400 bg-slate-900'
-                              }`}
-                          >
-                            {stock.rvol}x
-                          </span>
-                        </td>
-                        <td className="py-3 px-2 text-center font-sans">
-                          <span
-                            className={`inline-flex items-center space-x-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${stock.status === 'BREAKDOWN'
-                                ? 'bg-rose-950 text-rose-400 border border-rose-800/80'
-                                : 'bg-slate-900 text-slate-400 border border-slate-800'
-                              }`}
-                          >
-                            {stock.status === 'BREAKDOWN' ? (
-                              <>
-                                <ArrowDownRight className="h-2.5 w-2.5 text-rose-400" />
-                                <span>5M BREAKDOWN</span>
-                              </>
-                            ) : (
-                              <span>INSIDE 5M</span>
+                        {isPreview && (
+                          <td className="py-3 px-2 text-right">
+                            <div className={`font-extrabold text-xs sm:text-sm ${pnl.cls}`}>
+                              {pnl.label}
+                            </div>
+                            {pnl.pts && (
+                              <div className={`text-[10px] ${pnl.cls} opacity-80`}>{pnl.pts}</div>
                             )}
-                          </span>
-                        </td>
+                          </td>
+                        )}
+                        {isPreview && (
+                          <td className="py-3 px-2 text-center font-sans">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold border ${
+                                stock.result === 'PROFIT'
+                                  ? 'bg-emerald-950 text-emerald-400 border-emerald-800/80'
+                                  : stock.result === 'LOSS'
+                                    ? 'bg-rose-950 text-rose-400 border-rose-800/80'
+                                    : 'bg-slate-900 text-slate-400 border-slate-800'
+                              }`}
+                            >
+                              {stock.result || '—'}
+                            </span>
+                          </td>
+                        )}
+                        {!isPreview && (
+                          <td className="py-3 px-2 text-center">
+                            <span
+                              className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${stock.rvol >= 1.5
+                                  ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
+                                  : 'text-slate-400 bg-slate-900'
+                                }`}
+                            >
+                              {stock.rvol}x
+                            </span>
+                          </td>
+                        )}
+                        {!isPreview && (
+                          <td className="py-3 px-2 text-center font-sans">
+                            <span
+                              className={`inline-flex items-center space-x-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${stock.status === 'BREAKDOWN'
+                                  ? 'bg-rose-950 text-rose-400 border border-rose-800/80'
+                                  : 'bg-slate-900 text-slate-400 border border-slate-800'
+                                }`}
+                            >
+                              {stock.status === 'BREAKDOWN' ? (
+                                <>
+                                  <ArrowDownRight className="h-2.5 w-2.5 text-rose-400" />
+                                  <span>5M BREAKDOWN</span>
+                                </>
+                              ) : (
+                                <span>INSIDE 5M</span>
+                              )}
+                            </span>
+                          </td>
+                        )}
                         <td className="py-3 px-2 text-center">
                           <button
                             type="button"

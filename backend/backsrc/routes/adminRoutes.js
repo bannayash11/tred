@@ -1,4 +1,7 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { User } from '../models/User.js';
 import { authMiddleware, adminOnly, subAdminOrAdmin } from '../middleware/authMiddleware.js';
 import { marketDataService } from '../services/marketDataService.js';
@@ -17,9 +20,55 @@ import {
   getFreeTrialDays,
   setFreeTrialSettings,
   persistFreeTrialSettings,
+  getPaymentMethodsSettings,
+  setPaymentMethodsSettings,
+  persistPaymentMethodsSettings,
+  getUtrPayDetails,
+  setUtrPayDetails,
+  persistUtrPayDetails,
   buildSignupSubscription
 } from '../services/membershipPlans.js';
 import { getByokPublicStatus } from '../services/byokSessionService.js';
+import {
+  getPublicSmtpSettings,
+  setSmtpSettings,
+  persistSmtpSettings,
+  sendTestSmtpEmail,
+  isSmtpReady,
+  getEmailTemplatesPublic,
+  setEmailTemplate,
+  resetEmailTemplate,
+  persistEmailTemplates,
+  getTemplateVariableHelp,
+  renderTemplateString
+} from '../services/emailService.js';
+import {
+  getSocialMediaAdmin,
+  getPublicSocialMedia,
+  setSocialMediaSettings,
+  persistSocialMediaSettings
+} from '../services/socialMediaService.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
+
+const UTR_QR_MIME = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp'
+};
+
+function publicBaseFromReq(req) {
+  const envBase = String(process.env.BACKEND_PUBLIC_URL || '').trim().replace(/\/$/, '');
+  if (envBase) return envBase;
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.get('host') || 'localhost:5001')
+    .split(',')[0]
+    .trim();
+  return `${proto}://${host}`;
+}
 
 const router = express.Router();
 
@@ -69,7 +118,11 @@ router.get('/overview', authMiddleware, subAdminOrAdmin, async (req, res) => {
         ...maskBrokerSettings(systemSettings),
         byokSalesEnabled: getByokSalesEnabled(),
         freeTrialEnabled: getFreeTrialEnabled(),
-        freeTrialDays: getFreeTrialDays()
+        freeTrialDays: getFreeTrialDays(),
+        ...getPaymentMethodsSettings(),
+        utrPay: getUtrPayDetails(),
+        smtp: getPublicSmtpSettings(),
+        social: getSocialMediaAdmin()
       }
     });
   } catch (err) {
@@ -139,6 +192,112 @@ router.post('/users', authMiddleware, subAdminOrAdmin, async (req, res) => {
     res.status(201).json({ success: true, message: 'Trader created successfully', user: newUser });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// BULK IMPORT USERS (CSV / JSON)
+router.post('/users/import', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.users) ? req.body.users : [];
+    if (!rows.length) {
+      return res.status(400).json({ success: false, message: 'No user rows to import.' });
+    }
+    if (rows.length > 1000) {
+      return res.status(400).json({ success: false, message: 'Import limit is 1000 users per request.' });
+    }
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i] || {};
+      const email = String(row.email || '')
+        .trim()
+        .toLowerCase();
+      const name = String(row.name || '').trim();
+      if (!email || !name) {
+        skipped += 1;
+        errors.push({ row: i + 1, message: 'name and email are required.' });
+        continue;
+      }
+
+      let role = String(row.role || 'user').trim().toLowerCase();
+      if (!['user', 'subadmin', 'admin'].includes(role)) role = 'user';
+      if ((role === 'admin' || role === 'subadmin') && req.user.role !== 'admin') {
+        skipped += 1;
+        errors.push({ row: i + 1, email, message: 'Only Super Admin can import admin/subadmin roles.' });
+        continue;
+      }
+
+      const plan = String(row.plan || row.subscriptionPlan || 'No Active Plan').trim();
+      let status = String(row.status || row.subscriptionStatus || 'expired').trim().toLowerCase();
+      if (!['active', 'trial', 'expired'].includes(status)) status = 'expired';
+
+      const password = String(row.password || '').trim() || `Import@${Math.random().toString(36).slice(2, 10)}a1`;
+      const days = Number(row.durationDays || row.days);
+      const expiresAt =
+        row.expiresAt && !Number.isNaN(Date.parse(row.expiresAt))
+          ? new Date(row.expiresAt)
+          : Number.isFinite(days) && days > 0
+            ? new Date(Date.now() + days * 24 * 3600 * 1000)
+            : new Date(Date.now() - 60_000);
+
+      try {
+        const existing = await User.findOne({ email });
+        if (existing) {
+          existing.name = name;
+          existing.role = role;
+          existing.subscription = {
+            ...(existing.subscription?.toObject?.() || existing.subscription || {}),
+            status,
+            plan,
+            expiresAt
+          };
+          if (row.password && String(row.password).trim().length >= 8) {
+            existing.password = String(row.password).trim();
+          }
+          await existing.save();
+          updated += 1;
+        } else {
+          if (String(password).length < 8) {
+            skipped += 1;
+            errors.push({ row: i + 1, email, message: 'Password must be at least 8 characters.' });
+            continue;
+          }
+          await User.create({
+            name,
+            email,
+            password,
+            role,
+            subscription: {
+              status,
+              plan,
+              planId: null,
+              mode: status === 'active' ? 'server' : 'server',
+              byokGranted: false,
+              expiresAt
+            }
+          });
+          created += 1;
+        }
+      } catch (err) {
+        skipped += 1;
+        errors.push({ row: i + 1, email, message: err.message || 'Import failed' });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Import done — ${created} created, ${updated} updated, ${skipped} skipped.`,
+      created,
+      updated,
+      skipped,
+      errors: errors.slice(0, 50)
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -355,6 +514,150 @@ router.get('/settings/free-trial', authMiddleware, subAdminOrAdmin, (req, res) =
   });
 });
 
+router.get('/settings/payments', authMiddleware, subAdminOrAdmin, (req, res) => {
+  res.json({
+    success: true,
+    ...getPaymentMethodsSettings(),
+    utrPay: getUtrPayDetails(),
+    note: 'Razorpay default OFF. UPI ID / payee / QR can be edited from admin (stored in DB; .env is fallback).'
+  });
+});
+
+router.post('/settings/payments', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const current = getPaymentMethodsSettings();
+    const next = setPaymentMethodsSettings({
+      razorpayEnabled:
+        req.body.razorpayEnabled !== undefined ? req.body.razorpayEnabled : current.razorpayEnabled,
+      utrEnabled: req.body.utrEnabled !== undefined ? req.body.utrEnabled : current.utrEnabled,
+      utrAutoApprove:
+        req.body.utrAutoApprove !== undefined ? req.body.utrAutoApprove : current.utrAutoApprove
+    });
+    if (!next.razorpayEnabled && !next.utrEnabled) {
+      // Keep at least one method on — revert last write in memory
+      setPaymentMethodsSettings(current);
+      return res.status(400).json({
+        success: false,
+        message: 'At least one payment method (Razorpay or UTR) must stay enabled.'
+      });
+    }
+    try {
+      await persistPaymentMethodsSettings();
+    } catch {
+      /* in-memory still works */
+    }
+    res.json({
+      success: true,
+      message: `Payment methods updated — Razorpay ${next.razorpayEnabled ? 'ON' : 'OFF'}, UTR ${
+        next.utrEnabled ? 'ON' : 'OFF'
+      }, UTR auto-approve ${next.utrAutoApprove ? 'ON' : 'OFF'}.`,
+      ...next,
+      utrPay: getUtrPayDetails()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/** Super Admin: edit UPI ID / payee / QR / instructions shown at checkout */
+router.post('/settings/utr-config', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const next = setUtrPayDetails({
+      upiId: req.body.upiId,
+      payeeName: req.body.payeeName,
+      qrImageUrl: req.body.qrImageUrl,
+      instructions: req.body.instructions
+    });
+    if (!next.upiId) {
+      return res.status(400).json({
+        success: false,
+        message: 'UPI ID is required for UTR checkout (e.g. name@okhdfcbank).'
+      });
+    }
+    try {
+      await persistUtrPayDetails();
+    } catch {
+      /* in-memory still works */
+    }
+    res.json({
+      success: true,
+      message: 'UTR / UPI checkout details saved. Users will see the new UPI ID at checkout.',
+      utrPay: next
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Super Admin: upload UPI QR image (PNG/JPG/WEBP, max ~4MB).
+ * Body: { imageBase64: "data:image/png;base64,..." } OR { imageBase64, mimeType }
+ */
+router.post('/settings/utr-qr-upload', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const raw = String(req.body?.imageBase64 || '').trim();
+    if (!raw) {
+      return res.status(400).json({ success: false, message: 'imageBase64 is required.' });
+    }
+
+    let mime = String(req.body?.mimeType || '').trim().toLowerCase();
+    let b64 = raw;
+    const dataUrlMatch = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (dataUrlMatch) {
+      mime = dataUrlMatch[1].toLowerCase();
+      b64 = dataUrlMatch[2];
+    }
+    const ext = UTR_QR_MIME[mime];
+    if (!ext) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only PNG, JPG, or WEBP images are allowed for UPI QR.'
+      });
+    }
+
+    const buffer = Buffer.from(b64, 'base64');
+    if (!buffer.length) {
+      return res.status(400).json({ success: false, message: 'Invalid image data.' });
+    }
+    if (buffer.length > 4 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'QR image must be under 4MB.' });
+    }
+
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    // Remove previous utr-qr.* variants
+    for (const oldExt of Object.values(UTR_QR_MIME)) {
+      const oldPath = path.join(UPLOADS_DIR, `utr-qr.${oldExt}`);
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.unlinkSync(oldPath);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const filename = `utr-qr.${ext}`;
+    const filePath = path.join(UPLOADS_DIR, filename);
+    fs.writeFileSync(filePath, buffer);
+
+    const qrImageUrl = `${publicBaseFromReq(req)}/uploads/${filename}?v=${Date.now()}`;
+    const next = setUtrPayDetails({ qrImageUrl });
+    try {
+      await persistUtrPayDetails();
+    } catch {
+      /* in-memory still works */
+    }
+
+    res.json({
+      success: true,
+      message: 'UPI QR uploaded. Checkout will show this QR.',
+      qrImageUrl,
+      utrPay: next
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.post('/settings/free-trial', authMiddleware, adminOnly, async (req, res) => {
   try {
     const enabled =
@@ -422,12 +725,218 @@ router.post('/settings/announcement', authMiddleware, subAdminOrAdmin, (req, res
   res.json({ success: true, message: 'Announcement updated', settings: systemSettings });
 });
 
+// ================= SMTP EMAIL =================
+
+router.get('/settings/smtp', authMiddleware, adminOnly, (req, res) => {
+  res.json({
+    success: true,
+    smtp: getPublicSmtpSettings(),
+    ready: isSmtpReady()
+  });
+});
+
+router.post('/settings/smtp', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const {
+      enabled,
+      host,
+      port,
+      secure,
+      user,
+      pass,
+      fromName,
+      fromEmail
+    } = req.body || {};
+
+    if (host !== undefined && !String(host || '').trim()) {
+      return res.status(400).json({ success: false, message: 'SMTP host is required.' });
+    }
+    if (fromEmail !== undefined && String(fromEmail || '').trim() && !String(fromEmail).includes('@')) {
+      return res.status(400).json({ success: false, message: 'From email looks invalid.' });
+    }
+
+    setSmtpSettings({
+      enabled,
+      host,
+      port,
+      secure,
+      user,
+      pass,
+      fromName,
+      fromEmail
+    });
+    await persistSmtpSettings();
+
+    res.json({
+      success: true,
+      message: 'SMTP settings saved.',
+      smtp: getPublicSmtpSettings(),
+      ready: isSmtpReady()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || 'Could not save SMTP settings.' });
+  }
+});
+
+router.post('/settings/smtp/test', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const to = String(req.body?.to || req.user?.email || '')
+      .trim()
+      .toLowerCase();
+    if (!to || !to.includes('@')) {
+      return res.status(400).json({ success: false, message: 'Enter a valid test recipient email.' });
+    }
+    if (!isSmtpReady()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Save SMTP host, user, password, and from-email first (and enable SMTP).'
+      });
+    }
+    await sendTestSmtpEmail(to);
+    res.json({
+      success: true,
+      message: `Test email sent to ${to}. Check inbox (and spam).`
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message || 'SMTP test failed. Check host/port/credentials.'
+    });
+  }
+});
+
+// Email templates (signup / forgot password / 2FA / test)
+router.get('/settings/email-templates', authMiddleware, adminOnly, (req, res) => {
+  res.json({
+    success: true,
+    templates: getEmailTemplatesPublic(),
+    variables: getTemplateVariableHelp(),
+    smtp: getPublicSmtpSettings(),
+    ready: isSmtpReady()
+  });
+});
+
+router.put('/settings/email-templates/:key', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const key = String(req.params.key || '').trim();
+    const { subject, html, text, enabled } = req.body || {};
+    if (subject !== undefined && !String(subject || '').trim()) {
+      return res.status(400).json({ success: false, message: 'Subject is required.' });
+    }
+    if (html !== undefined && !String(html || '').trim()) {
+      return res.status(400).json({ success: false, message: 'HTML body is required.' });
+    }
+
+    const saved = setEmailTemplate(key, { subject, html, text, enabled });
+    await persistEmailTemplates();
+
+    res.json({
+      success: true,
+      message: `Template "${key}" saved.`,
+      template: {
+        ...saved,
+        ...(getEmailTemplatesPublic().find((t) => t.key === key) || {})
+      }
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Could not save template.' });
+  }
+});
+
+router.post('/settings/email-templates/:key/reset', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const key = String(req.params.key || '').trim();
+    const saved = resetEmailTemplate(key);
+    await persistEmailTemplates();
+    res.json({
+      success: true,
+      message: `Template "${key}" reset to default.`,
+      template: {
+        ...saved,
+        ...(getEmailTemplatesPublic().find((t) => t.key === key) || {})
+      }
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Could not reset template.' });
+  }
+});
+
+router.post('/settings/email-templates/:key/preview', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const key = String(req.params.key || '').trim();
+    const list = getEmailTemplatesPublic();
+    const tpl = list.find((t) => t.key === key);
+    if (!tpl) {
+      return res.status(404).json({ success: false, message: 'Template not found.' });
+    }
+    const sample = {
+      otp: '482917',
+      name: 'Yashvardhan',
+      email: 'demo@tradrift.in',
+      expiresMinutes: '10',
+      brand: getPublicSmtpSettings().fromName || 'Tradrift',
+      year: String(new Date().getFullYear()),
+      purpose: tpl.purpose || key
+    };
+    res.json({
+      success: true,
+      subject: renderTemplateString(tpl.subject, sample),
+      html: renderTemplateString(tpl.html, sample),
+      text: renderTemplateString(tpl.text, sample),
+      sample
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Preview failed.' });
+  }
+});
+
 router.get('/public-announcement', (req, res) => {
   res.json({
     success: true,
     enabled: systemSettings.announcementEnabled,
     announcement: systemSettings.announcement
   });
+});
+
+router.get('/public-social', (_req, res) => {
+  res.json({
+    success: true,
+    social: getPublicSocialMedia()
+  });
+});
+
+router.get('/settings/social', authMiddleware, subAdminOrAdmin, (_req, res) => {
+  res.json({
+    success: true,
+    platforms: getSocialMediaAdmin()
+  });
+});
+
+router.post('/settings/social', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const platforms = Array.isArray(req.body?.platforms) ? req.body.platforms : null;
+    if (!platforms) {
+      return res.status(400).json({ success: false, message: 'platforms array is required.' });
+    }
+    for (const row of platforms) {
+      const url = String(row?.url || '').trim();
+      if (row?.enabled && url && !/^https?:\/\//i.test(url)) {
+        return res.status(400).json({
+          success: false,
+          message: `${row.label || row.key}: URL must start with http:// or https://`
+        });
+      }
+    }
+    setSocialMediaSettings({ platforms });
+    await persistSocialMediaSettings();
+    res.json({
+      success: true,
+      message: 'Social media settings saved.',
+      platforms: getSocialMediaAdmin()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || 'Could not save social settings.' });
+  }
 });
 
 // ================= OPENING 5-MINUTE MOMENTUM SCANNER ADMIN =================
@@ -480,6 +989,46 @@ router.post('/opening-momentum/reset', authMiddleware, subAdminOrAdmin, (req, re
       return res.status(409).json(result);
     }
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Manually archive today's (or current freeze) EOD momentum snapshot
+router.post('/opening-momentum/archive', authMiddleware, subAdminOrAdmin, async (req, res) => {
+  try {
+    const force = !!req.body?.force;
+    const result = await openingMomentumService.archiveSession(marketDataService.stocks, {
+      force,
+      source: 'admin'
+    });
+    if (!result.success) {
+      return res.status(409).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// List / fetch archived snapshots (admin)
+router.get('/opening-momentum/history/dates', authMiddleware, subAdminOrAdmin, async (req, res) => {
+  try {
+    const dates = await openingMomentumService.listHistoryDates(req.query.limit || 60);
+    res.json({ success: true, dates });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/opening-momentum/history/:date', authMiddleware, subAdminOrAdmin, async (req, res) => {
+  try {
+    const date = String(req.params.date || '');
+    const doc = await openingMomentumService.getHistorySnapshot(date);
+    if (!doc) {
+      return res.status(404).json({ success: false, message: `No archive for ${date}` });
+    }
+    res.json({ success: true, data: openingMomentumService.formatHistoryPayload(doc) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

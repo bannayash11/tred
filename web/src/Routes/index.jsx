@@ -5,8 +5,6 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import Home from '../Pages/Home';
 import Terminal from '../Pages/Terminal';
 import OpeningMomentum from '../Pages/OpeningMomentum';
-import DirectionalScanner from '../Pages/DirectionalScanner';
-import AlphaMove2 from '../Pages/AlphaMove2';
 import MarketXRay from '../Pages/MarketXRay';
 import UserDashboard from '../Pages/UserDashboard';
 import Pricing from '../Pages/Pricing';
@@ -55,30 +53,6 @@ export default function AppRoutes() {
           element={
             <ProtectedRoute>
               <OpeningMomentum />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="alpha-move"
-          element={
-            <ProtectedRoute>
-              <DirectionalScanner />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="directional"
-          element={
-            <ProtectedRoute>
-              <DirectionalScanner />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="alpha-move-2"
-          element={
-            <ProtectedRoute>
-              <AlphaMove2 />
             </ProtectedRoute>
           }
         />

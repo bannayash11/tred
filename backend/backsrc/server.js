@@ -1,10 +1,15 @@
 import express from 'express';
 import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { execSync } from 'child_process';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import authRoutes from './routes/authRoutes.js';
 import screenerRoutes from './routes/screenerRoutes.js';
@@ -13,8 +18,6 @@ import contentRoutes from './routes/contentRoutes.js';
 import seoRoutes from './routes/seoRoutes.js';
 import cmsRoutes from './routes/cmsRoutes.js';
 import orderFlowRoutes from './routes/orderFlowRoutes.js';
-import directionalScannerRoutes from './routes/directionalScannerRoutes.js';
-import alphaMove2Routes from './routes/alphaMove2Routes.js';
 import paymentRoutes, { handlePaymentWebhook } from './routes/paymentRoutes.js';
 import { marketDataService } from './services/marketDataService.js';
 import { orderFlowService } from './services/orderFlowService.js';
@@ -25,8 +28,12 @@ import { User } from './models/User.js';
 import {
   loadByokSettingsFromDb,
   loadFreeTrialSettingsFromDb,
+  loadPaymentMethodsSettingsFromDb,
+  loadUtrPayDetailsFromDb,
   loadPlansFromDb
 } from './services/membershipPlans.js';
+import { loadSmtpSettingsFromDb, loadEmailTemplatesFromDb } from './services/emailService.js';
+import { loadSocialMediaFromDb } from './services/socialMediaService.js';
 import jwt from 'jsonwebtoken';
 
 dotenv.config();
@@ -82,7 +89,11 @@ app.post(
   handlePaymentWebhook
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
+
+// Uploaded UPI QR images (admin upload)
+const uploadsDir = path.resolve(__dirname, '../uploads');
+app.use('/uploads', express.static(uploadsDir, { maxAge: '7d', fallthrough: true }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -100,8 +111,6 @@ app.use('/api/content', contentRoutes);
 app.use('/api/seo', seoRoutes);
 app.use('/api/cms', cmsRoutes);
 app.use('/api/order-flow', orderFlowRoutes);
-app.use('/api/directional-scanner', directionalScannerRoutes);
-app.use('/api/alpha-move-2', alphaMove2Routes);
 app.use('/api/payment', paymentRoutes);
 
 // Health Check
@@ -209,9 +218,14 @@ async function connectMongo(attempt = 1) {
       await Promise.all([
         loadPlansFromDb(),
         loadByokSettingsFromDb(),
-        loadFreeTrialSettingsFromDb()
+        loadFreeTrialSettingsFromDb(),
+        loadPaymentMethodsSettingsFromDb(),
+        loadUtrPayDetailsFromDb(),
+        loadSmtpSettingsFromDb(),
+        loadEmailTemplatesFromDb(),
+        loadSocialMediaFromDb()
       ]);
-      console.log('[Membership] Plans + BYOK + free-trial settings loaded from DB.');
+      console.log('[Membership] Plans + BYOK + free-trial + payment-methods + UTR + SMTP + email templates + social loaded from DB.');
     } catch (planErr) {
       console.warn('[Membership] Using default in-memory plans:', planErr.message || planErr);
     }

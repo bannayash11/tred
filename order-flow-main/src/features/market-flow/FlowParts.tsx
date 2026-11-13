@@ -69,7 +69,7 @@ export function DotMeter({ checks, count = false }: { checks: FlowCheck[]; count
   );
 }
 
-/* The sector's name for the narrow rail, as OrderBlock's own rail does
+/* The sector's name for the narrow rail, as Tradrift's own rail does
    ("Cap Goods", not "Capital Goods & Infra", which was cut to "Capital
    Good…"). The full name stays in the pill's tooltip and its label. */
 const SECTOR_SHORT: Readonly<Record<string, string>> = {

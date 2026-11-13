@@ -1,4 +1,4 @@
-# OrderBlock X — Apache / Hostinger SPA config
+# Tradrift — Apache / Hostinger SPA config
 # Place this at the site document root (copied from Vite public/ on build)
 
 Options -Indexes
