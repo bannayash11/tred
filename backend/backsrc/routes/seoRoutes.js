@@ -9,11 +9,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'home',
     path: '/',
     pageName: 'Home',
-    metaTitle: 'OrderBlock X — Institutional SMC & Liquidity Terminal',
+    metaTitle: 'Tradrift — Institutional SMC & Liquidity Terminal',
     metaDescription:
       'Live Smart Money Concepts terminal for Indian F&O. Track order blocks, fair value gaps, liquidity sweeps and institutional footprints in real time.',
     metaKeywords: 'order block, smart money concepts, SMC, liquidity, F&O, nifty, banknifty, trading terminal',
-    ogTitle: 'OrderBlock X — Institutional SMC Terminal',
+    ogTitle: 'Tradrift — Institutional SMC Terminal',
     ogDescription: 'Real-time SMC order block & liquidity analytics for Indian markets.',
     ogImage: '',
     canonicalUrl: '/',
@@ -24,11 +24,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'terminal',
     path: '/terminal',
     pageName: 'Live Terminal',
-    metaTitle: 'Live SMC Terminal | OrderBlock X',
+    metaTitle: 'Live SMC Terminal | Tradrift',
     metaDescription:
-      'Scan live F&O stocks for bullish and bearish order block setups, FVGs and liquidity traps with the OrderBlock X terminal.',
+      'Scan live F&O stocks for bullish and bearish order block setups, FVGs and liquidity traps with the Tradrift terminal.',
     metaKeywords: 'SMC terminal, order block scanner, FVG, live trading screener',
-    ogTitle: 'Live SMC Terminal | OrderBlock X',
+    ogTitle: 'Live SMC Terminal | Tradrift',
     ogDescription: 'Institutional order block screener for Indian F&O markets.',
     ogImage: '',
     canonicalUrl: '/terminal',
@@ -39,11 +39,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'market-xray',
     path: '/xray',
     pageName: 'Market X-Ray',
-    metaTitle: 'Market X-Ray — Sector Heatmap & Institutional Flow | OrderBlock X',
+    metaTitle: 'Market X-Ray — Sector Heatmap & Institutional Flow | Tradrift',
     metaDescription:
       'Visualize sector strength, institutional flow and market breadth with Market X-Ray analytics.',
     metaKeywords: 'market xray, sector heatmap, institutional flow, market breadth',
-    ogTitle: 'Market X-Ray | OrderBlock X',
+    ogTitle: 'Market X-Ray | Tradrift',
     ogDescription: 'Sector heatmap and institutional flow dashboard.',
     ogImage: '',
     canonicalUrl: '/xray',
@@ -51,58 +51,14 @@ const DEFAULT_SEO_PAGES = [
     sortOrder: 3
   },
   {
-    pageKey: 'news',
-    path: '/news',
-    pageName: 'Market News',
-    metaTitle: 'Live Market News Wire | OrderBlock X',
-    metaDescription:
-      'Institutional market news, sector pulses and liquidity-focused headlines for Indian traders.',
-    metaKeywords: 'market news, nifty news, institutional wire, trading headlines',
-    ogTitle: 'Live Market News | OrderBlock X',
-    ogDescription: 'Real-time market news for SMC traders.',
-    ogImage: '',
-    canonicalUrl: '/news',
-    robots: 'index, follow',
-    sortOrder: 4
-  },
-  {
-    pageKey: 'blog',
-    path: '/blog',
-    pageName: 'SMC Blog Library',
-    metaTitle: 'SMC Educational Blog — Order Blocks, FVG & Liquidity | OrderBlock X',
-    metaDescription:
-      'Learn Smart Money Concepts, order blocks, fair value gaps and liquidity sweeps with practical trading guides.',
-    metaKeywords: 'SMC blog, order block guide, FVG tutorial, liquidity sweep',
-    ogTitle: 'SMC Educational Hub | OrderBlock X',
-    ogDescription: 'In-depth Smart Money Concepts educational articles.',
-    ogImage: '',
-    canonicalUrl: '/blog',
-    robots: 'index, follow',
-    sortOrder: 5
-  },
-  {
-    pageKey: 'blog-detail',
-    path: '/blog/:id',
-    pageName: 'Blog Article (Dynamic)',
-    metaTitle: '{title} | OrderBlock X Blog',
-    metaDescription: '{excerpt}',
-    metaKeywords: 'SMC article, order block education, trading guide',
-    ogTitle: '{title}',
-    ogDescription: '{excerpt}',
-    ogImage: '',
-    canonicalUrl: '/blog/{id}',
-    robots: 'index, follow',
-    sortOrder: 6
-  },
-  {
     pageKey: 'pricing',
     path: '/pricing',
     pageName: 'Pricing & Plans',
-    metaTitle: 'Pricing & Membership Plans | OrderBlock X',
+    metaTitle: 'Pricing & Membership Plans | Tradrift',
     metaDescription:
-      'Compare OrderBlock X trial, starter and pro membership plans for live SMC terminal access.',
-    metaKeywords: 'orderblock pricing, trading terminal plans, SMC membership',
-    ogTitle: 'Membership Plans | OrderBlock X',
+      'Compare Tradrift trial, starter and pro membership plans for live SMC terminal access.',
+    metaKeywords: 'tradrift pricing, trading terminal plans, SMC membership',
+    ogTitle: 'Membership Plans | Tradrift',
     ogDescription: 'Choose the right plan for institutional SMC analytics.',
     ogImage: '',
     canonicalUrl: '/pricing',
@@ -113,11 +69,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'about',
     path: '/about',
     pageName: 'About Us',
-    metaTitle: 'About OrderBlock X — Institutional Trading Analytics',
+    metaTitle: 'About Tradrift — Institutional Trading Analytics',
     metaDescription:
-      'Learn about OrderBlock X, our SMC research approach, and how we help traders read institutional footprints.',
-    metaKeywords: 'about orderblock, SMC research, trading analytics team',
-    ogTitle: 'About OrderBlock X',
+      'Learn about Tradrift, our SMC research approach, and how we help traders read institutional footprints.',
+    metaKeywords: 'about tradrift, SMC research, trading analytics team',
+    ogTitle: 'About Tradrift',
     ogDescription: 'Institutional SMC analytics built for serious F&O traders.',
     ogImage: '',
     canonicalUrl: '/about',
@@ -128,41 +84,26 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'contact',
     path: '/contact',
     pageName: 'Contact',
-    metaTitle: 'Contact OrderBlock X Support',
+    metaTitle: 'Contact Tradrift Support',
     metaDescription:
-      'Get in touch with OrderBlock X for support, partnerships and membership queries.',
-    metaKeywords: 'contact orderblock, trading support, membership help',
-    ogTitle: 'Contact | OrderBlock X',
-    ogDescription: 'Reach the OrderBlock X team for support and inquiries.',
+      'Get in touch with Tradrift for support, partnerships and membership queries.',
+    metaKeywords: 'contact tradrift, trading support, membership help',
+    ogTitle: 'Contact | Tradrift',
+    ogDescription: 'Reach the Tradrift team for support and inquiries.',
     ogImage: '',
     canonicalUrl: '/contact',
     robots: 'index, follow',
     sortOrder: 9
   },
   {
-    pageKey: 'trade-log',
-    path: '/trade-log',
-    pageName: 'Trade Log',
-    metaTitle: 'Trade Log | OrderBlock X',
-    metaDescription:
-      'Log broker trades here to review SMC setups, R:R and performance. Not a practice account — your execution diary.',
-    metaKeywords: 'trade log, broker trade tracker, SMC performance tracking',
-    ogTitle: 'Trade Log | OrderBlock X',
-    ogDescription: 'Record and review your order block trades from your broker.',
-    ogImage: '',
-    canonicalUrl: '/trade-log',
-    robots: 'noindex, nofollow',
-    sortOrder: 10
-  },
-  {
     pageKey: 'dashboard',
     path: '/dashboard',
     pageName: 'User Dashboard',
-    metaTitle: 'Trader Dashboard | OrderBlock X',
-    metaDescription: 'Manage your OrderBlock X membership, sessions and account settings.',
+    metaTitle: 'Trader Dashboard | Tradrift',
+    metaDescription: 'Manage your Tradrift membership, sessions and account settings.',
     metaKeywords: 'trader dashboard, account settings, membership',
-    ogTitle: 'Trader Dashboard | OrderBlock X',
-    ogDescription: 'Your OrderBlock X account dashboard.',
+    ogTitle: 'Trader Dashboard | Tradrift',
+    ogDescription: 'Your Tradrift account dashboard.',
     ogImage: '',
     canonicalUrl: '/dashboard',
     robots: 'noindex, nofollow',
@@ -172,11 +113,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'login',
     path: '/login',
     pageName: 'Login',
-    metaTitle: 'Sign In | OrderBlock X',
-    metaDescription: 'Sign in to your OrderBlock X account to access the live SMC terminal.',
-    metaKeywords: 'orderblock login, trader sign in',
-    ogTitle: 'Sign In | OrderBlock X',
-    ogDescription: 'Access your OrderBlock X trading account.',
+    metaTitle: 'Sign In | Tradrift',
+    metaDescription: 'Sign in to your Tradrift account to access the live SMC terminal.',
+    metaKeywords: 'tradrift login, trader sign in',
+    ogTitle: 'Sign In | Tradrift',
+    ogDescription: 'Access your Tradrift trading account.',
     ogImage: '',
     canonicalUrl: '/login',
     robots: 'noindex, follow',
@@ -186,12 +127,12 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'register',
     path: '/register',
     pageName: 'Register',
-    metaTitle: 'Create Account | OrderBlock X',
+    metaTitle: 'Create Account | Tradrift',
     metaDescription:
-      'Create your OrderBlock X account and start analyzing institutional order blocks in Indian markets.',
-    metaKeywords: 'orderblock register, create trading account, SMC signup',
-    ogTitle: 'Create Account | OrderBlock X',
-    ogDescription: 'Join OrderBlock X and trade with institutional SMC tools.',
+      'Create your Tradrift account and start analyzing institutional order blocks in Indian markets.',
+    metaKeywords: 'tradrift register, create trading account, SMC signup',
+    ogTitle: 'Create Account | Tradrift',
+    ogDescription: 'Join Tradrift and trade with institutional SMC tools.',
     ogImage: '',
     canonicalUrl: '/register',
     robots: 'noindex, follow',
@@ -201,11 +142,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'privacy-policy',
     path: '/privacy-policy',
     pageName: 'Privacy Policy',
-    metaTitle: 'Privacy Policy | OrderBlock X',
-    metaDescription: 'Read how OrderBlock X collects, uses and protects your personal data.',
-    metaKeywords: 'privacy policy, data protection, orderblock privacy',
-    ogTitle: 'Privacy Policy | OrderBlock X',
-    ogDescription: 'OrderBlock X privacy policy for trader accounts and platform usage.',
+    metaTitle: 'Privacy Policy | Tradrift',
+    metaDescription: 'Read how Tradrift collects, uses and protects your personal data.',
+    metaKeywords: 'privacy policy, data protection, tradrift privacy',
+    ogTitle: 'Privacy Policy | Tradrift',
+    ogDescription: 'Tradrift privacy policy for trader accounts and platform usage.',
     ogImage: '',
     canonicalUrl: '/privacy-policy',
     robots: 'index, follow',
@@ -215,11 +156,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'terms',
     path: '/terms',
     pageName: 'Terms & Conditions',
-    metaTitle: 'Terms & Conditions | OrderBlock X',
-    metaDescription: 'Terms of use for the OrderBlock X Smart Money Concepts trading analytics platform.',
-    metaKeywords: 'terms and conditions, terms of use, orderblock terms',
-    ogTitle: 'Terms & Conditions | OrderBlock X',
-    ogDescription: 'Legal terms for using OrderBlock X analytics and membership services.',
+    metaTitle: 'Terms & Conditions | Tradrift',
+    metaDescription: 'Terms of use for the Tradrift Smart Money Concepts trading analytics platform.',
+    metaKeywords: 'terms and conditions, terms of use, tradrift terms',
+    ogTitle: 'Terms & Conditions | Tradrift',
+    ogDescription: 'Legal terms for using Tradrift analytics and membership services.',
     ogImage: '',
     canonicalUrl: '/terms',
     robots: 'index, follow',
@@ -229,11 +170,11 @@ const DEFAULT_SEO_PAGES = [
     pageKey: 'faq',
     path: '/faq',
     pageName: 'FAQ',
-    metaTitle: 'FAQ — Frequently Asked Questions | OrderBlock X',
-    metaDescription: 'Answers about OrderBlock X accounts, trial, SMC terminal, and platform policies.',
-    metaKeywords: 'orderblock faq, trading terminal help, SMC questions',
-    ogTitle: 'FAQ | OrderBlock X',
-    ogDescription: 'Common questions about OrderBlock X membership and features.',
+    metaTitle: 'FAQ — Frequently Asked Questions | Tradrift',
+    metaDescription: 'Answers about Tradrift accounts, trial, SMC terminal, and platform policies.',
+    metaKeywords: 'tradrift faq, trading terminal help, SMC questions',
+    ogTitle: 'FAQ | Tradrift',
+    ogDescription: 'Common questions about Tradrift membership and features.',
     ogImage: '',
     canonicalUrl: '/faq',
     robots: 'index, follow',
@@ -323,7 +264,7 @@ router.get('/pages', async (req, res) => {
   }
 });
 
-// Public: resolve SEO by path (exact or pattern like /blog/:id)
+// Public: resolve SEO by path
 router.get('/resolve', async (req, res) => {
   try {
     const rawPath = (req.query.path || '/').toString();
@@ -340,16 +281,10 @@ router.get('/resolve', async (req, res) => {
     // Exact match first
     let match = pages.find((p) => p.path === pathname);
 
-    // Alias: /market-xray -> /xray, /about-us -> /about, /journal -> /trade-log
-    if (!match && (pathname === '/market-xray' || pathname === '/about-us' || pathname === '/journal')) {
-      const aliasPath =
-        pathname === '/market-xray' ? '/xray' : pathname === '/about-us' ? '/about' : '/trade-log';
-      match = pages.find((p) => p.path === aliasPath || p.pageKey === 'trade-log');
-    }
-
-    // Dynamic blog detail: /blog/:id
-    if (!match && pathname.startsWith('/blog/') && pathname !== '/blog/') {
-      match = pages.find((p) => p.pageKey === 'blog-detail' || p.path === '/blog/:id');
+    // Alias: /market-xray -> /xray, /about-us -> /about
+    if (!match && (pathname === '/market-xray' || pathname === '/about-us')) {
+      const aliasPath = pathname === '/market-xray' ? '/xray' : '/about';
+      match = pages.find((p) => p.path === aliasPath);
     }
 
     if (!match) {

@@ -2,6 +2,13 @@ import React, { useState } from 'react';
 import { Users, Plus, Search, Edit, Trash2, X } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import ConfirmModal from '../components/ConfirmModal';
+import {
+  isValidEmail,
+  normalizeEmail,
+  wholeNumberAtLeast,
+  firstError,
+  fieldBorderClass
+} from '../lib/formValidation';
 
 export default function Traders() {
   const { adminUser, usersList, createUser, updateUser, deleteUser, extendUserSub, showToast } = useAdmin();
@@ -12,6 +19,8 @@ export default function Traders() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [formErrors, setFormErrors] = useState({});
+  const [editErrors, setEditErrors] = useState({});
 
   const [form, setForm] = useState({
     name: '',
@@ -25,24 +34,68 @@ export default function Traders() {
 
   const handleAddSubmit = async (e) => {
     e.preventDefault();
-    await createUser(form);
-    setShowAddModal(false);
-    setForm({
-      name: '',
-      email: '',
-      password: 'password123',
-      role: 'user',
-      plan: '12 Months Pro Bundle',
-      status: 'active',
-      durationDays: 365
-    });
+    const errors = {};
+    if (!String(form.name || '').trim()) errors.name = 'Full name is required.';
+    const email = normalizeEmail(form.email);
+    if (!email) errors.email = 'Email is required.';
+    else if (!isValidEmail(email)) errors.email = 'Enter a valid email address.';
+    if (!form.password || String(form.password).length < 6) {
+      errors.password = 'Password must be at least 6 characters.';
+    }
+    if (!wholeNumberAtLeast(form.durationDays, 1)) {
+      errors.durationDays = 'Validity must be at least 1 day.';
+    }
+    if (Object.keys(errors).length) {
+      setFormErrors(errors);
+      showToast(firstError(errors));
+      return;
+    }
+    try {
+      await createUser({ ...form, email, name: String(form.name).trim() });
+      setShowAddModal(false);
+      setFormErrors({});
+      setForm({
+        name: '',
+        email: '',
+        password: 'password123',
+        role: 'user',
+        plan: '12 Months Pro Bundle',
+        status: 'active',
+        durationDays: 365
+      });
+    } catch (err) {
+      const msg = err?.userMessage || err?.response?.data?.message || 'Could not create trader. Please check details.';
+      setFormErrors({ email: msg });
+      showToast(msg);
+    }
   };
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!editingUser) return;
-    await updateUser(editingUser._id, editingUser);
-    setEditingUser(null);
+    const errors = {};
+    if (!String(editingUser.name || '').trim()) errors.name = 'Trader name is required.';
+    const email = normalizeEmail(editingUser.email);
+    if (!email) errors.email = 'Email is required.';
+    else if (!isValidEmail(email)) errors.email = 'Enter a valid email address.';
+    if (Object.keys(errors).length) {
+      setEditErrors(errors);
+      showToast(firstError(errors));
+      return;
+    }
+    try {
+      await updateUser(editingUser._id, {
+        ...editingUser,
+        name: String(editingUser.name).trim(),
+        email
+      });
+      setEditingUser(null);
+      setEditErrors({});
+    } catch (err) {
+      const msg = err?.userMessage || err?.response?.data?.message || 'Could not update trader.';
+      setEditErrors({ email: msg });
+      showToast(msg);
+    }
   };
 
   const filtered = usersList.filter(u =>
@@ -210,7 +263,7 @@ export default function Traders() {
               </button>
             </div>
 
-            <form onSubmit={handleAddSubmit} className="space-y-3">
+            <form onSubmit={handleAddSubmit} className="space-y-3" noValidate>
               <div>
                 <label className="text-slate-400 block mb-1">Full Name</label>
                 <input
@@ -218,9 +271,15 @@ export default function Traders() {
                   required
                   placeholder="e.g. Ramesh Kumar"
                   value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800"
+                  onChange={(e) => {
+                    setForm({ ...form, name: e.target.value });
+                    setFormErrors({});
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${fieldBorderClass(!!formErrors.name)}`}
                 />
+                {formErrors.name && (
+                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{formErrors.name}</p>
+                )}
               </div>
 
               <div>
@@ -228,11 +287,20 @@ export default function Traders() {
                 <input
                   type="email"
                   required
+                  autoCapitalize="none"
                   placeholder="ramesh@trader.com"
                   value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800"
+                  onChange={(e) => {
+                    setForm({ ...form, email: e.target.value.toLowerCase() });
+                    setFormErrors({});
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${fieldBorderClass(!!formErrors.email)}`}
                 />
+                {formErrors.email ? (
+                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{formErrors.email}</p>
+                ) : (
+                  <p className="mt-1 text-[10px] text-slate-500">Email is not case-sensitive.</p>
+                )}
               </div>
 
               <div>
@@ -277,19 +345,46 @@ export default function Traders() {
               </div>
 
               <div>
+                <label className="text-slate-400 block mb-1">Temporary Password</label>
+                <input
+                  type="text"
+                  required
+                  minLength={6}
+                  value={form.password}
+                  onChange={(e) => {
+                    setForm({ ...form, password: e.target.value });
+                    setFormErrors({});
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${fieldBorderClass(!!formErrors.password)}`}
+                />
+                {formErrors.password && (
+                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{formErrors.password}</p>
+                )}
+              </div>
+
+              <div>
                 <label className="text-slate-400 block mb-1">Validity Duration (Days)</label>
                 <input
                   type="number"
                   value={form.durationDays}
-                  onChange={(e) => setForm({ ...form, durationDays: Number(e.target.value) })}
-                  className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800"
+                  onChange={(e) => {
+                    setForm({ ...form, durationDays: Number(e.target.value) });
+                    setFormErrors({});
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${fieldBorderClass(!!formErrors.durationDays)}`}
                 />
+                {formErrors.durationDays && (
+                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{formErrors.durationDays}</p>
+                )}
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setFormErrors({});
+                  }}
                   className="rounded-xl bg-slate-800 px-4 py-2 text-slate-300"
                 >
                   Cancel
@@ -320,16 +415,22 @@ export default function Traders() {
               </button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="space-y-3">
+            <form onSubmit={handleEditSubmit} className="space-y-3" noValidate>
               <div>
                 <label className="text-slate-400 block mb-1">Trader Name</label>
                 <input
                   type="text"
                   required
                   value={editingUser.name}
-                  onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })}
-                  className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800"
+                  onChange={(e) => {
+                    setEditingUser({ ...editingUser, name: e.target.value });
+                    setEditErrors({});
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${fieldBorderClass(!!editErrors.name)}`}
                 />
+                {editErrors.name && (
+                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{editErrors.name}</p>
+                )}
               </div>
 
               <div>
@@ -337,10 +438,17 @@ export default function Traders() {
                 <input
                   type="email"
                   required
+                  autoCapitalize="none"
                   value={editingUser.email}
-                  onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
-                  className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800"
+                  onChange={(e) => {
+                    setEditingUser({ ...editingUser, email: e.target.value.toLowerCase() });
+                    setEditErrors({});
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${fieldBorderClass(!!editErrors.email)}`}
                 />
+                {editErrors.email && (
+                  <p className="mt-1.5 text-[11px] font-medium text-rose-400">{editErrors.email}</p>
+                )}
               </div>
 
               <div>

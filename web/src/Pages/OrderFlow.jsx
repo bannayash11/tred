@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import MembershipLocked from '../components/MembershipLocked';
 import { getMembership } from '../lib/membership';
 import { MarketFlowPage } from '../vendor/order-flow/features/market-flow/MarketFlowPage';
 import { loadUnderlyings } from '../vendor/order-flow/lib/underlyings';
+import { getApiErrorMessage } from '../lib/apiError';
 
 export default function OrderFlow() {
+  const navigate = useNavigate();
   const user = useSelector((state) => state.auth.user);
   const plans = useSelector((state) => state.content?.plans || []);
   const membership = getMembership(user, plans);
   const [universe, setUniverse] = useState(null);
   const [loadError, setLoadError] = useState(null);
+
+  // Full Pricing page (BYOK / Server plans) — not the legacy promo modal
+  const onOpenPricing = () => navigate('/pricing');
 
   useEffect(() => {
     let live = true;
@@ -19,7 +25,7 @@ export default function OrderFlow() {
         if (live) setUniverse(rows);
       })
       .catch((err) => {
-        if (live) setLoadError(String(err?.message || err));
+        if (live) setLoadError(getApiErrorMessage(err, 'Failed to load underlyings.'));
       });
     return () => {
       live = false;
@@ -31,6 +37,7 @@ export default function OrderFlow() {
       <MembershipLocked
         title="Order Flow locked"
         message={membership.upgradeHint || 'Your membership does not include Order Flow access.'}
+        onOpenPricing={onOpenPricing}
       />
     );
   }

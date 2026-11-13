@@ -19,10 +19,12 @@ export default function MarketXRay(props) {
   const [localData, setLocalData] = useState(
     props.xrayData || context.xrayData || reduxXRay || null
   );
+  const [fetchError, setFetchError] = useState('');
 
   useEffect(() => {
     if (context.xrayData) {
       setLocalData(context.xrayData);
+      setFetchError('');
       return;
     }
     fetchMarketXRay()
@@ -30,9 +32,13 @@ export default function MarketXRay(props) {
         if (res.success && res.data) {
           setLocalData(res.data);
           dispatch(setMarketXRay(res.data));
+          setFetchError('');
         }
       })
-      .catch((err) => console.error('Error fetching Market X-Ray:', err));
+      .catch((err) => {
+        console.error('Error fetching Market X-Ray:', err);
+        setFetchError(err.userMessage || 'Could not load Market X-Ray.');
+      });
   }, [context.xrayData, dispatch]);
 
   const onSelectStock = props.onSelectStock || context.onSelectStock;
@@ -53,7 +59,11 @@ export default function MarketXRay(props) {
   return (
     <div className="space-y-5">
       <MembershipBanner user={user} onOpenPricing={onOpenPricing} />
-      <MarketXRayView xrayData={localData} onSelectStock={onSelectStock} />
+      <MarketXRayView
+        xrayData={localData}
+        onSelectStock={onSelectStock}
+        errorMessage={fetchError}
+      />
     </div>
   );
 }

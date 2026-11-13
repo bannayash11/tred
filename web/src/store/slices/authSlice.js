@@ -5,8 +5,8 @@ const USER_KEY = 'tred_auth_user';
 
 // Migrate / clear legacy keys and static demo tokens once
 try {
-  localStorage.removeItem('orderblock_token');
-  localStorage.removeItem('orderblock_user');
+  localStorage.removeItem('tradrift_token');
+  localStorage.removeItem('tradrift_user');
   const legacy = localStorage.getItem(TOKEN_KEY);
   if (
     legacy === 'demo-user-token' ||
@@ -102,11 +102,14 @@ export const authSlice = createSlice({
       const payload = action.payload || {};
       const planName = payload.plan || payload.name || 'Membership Plan';
       const days = Number(payload.durationDays) || (Number(payload.durationMonths) || 12) * 30;
+      const mode = payload.mode === 'byok' ? 'byok' : payload.mode === 'server' ? 'server' : 'server';
       if (state.user) {
         state.user.subscription = {
           status: 'active',
           plan: planName,
           planId: payload.planId || payload.id || null,
+          mode,
+          byokGranted: mode === 'byok' ? true : !!state.user.subscription?.byokGranted,
           expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
         };
         localStorage.setItem(USER_KEY, JSON.stringify(state.user));

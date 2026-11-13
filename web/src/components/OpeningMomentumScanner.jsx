@@ -25,6 +25,7 @@ export default function OpeningMomentumScanner({
   const membership = getMembership(user, plans);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [data, setData] = useState({
     gainers: [],
     losers: [],
@@ -47,12 +48,18 @@ export default function OpeningMomentumScanner({
       .then((res) => {
         if (isMounted && res.success && res.data) {
           setData(res.data);
+          setLoadError('');
+          setLoading(false);
+        } else if (isMounted) {
           setLoading(false);
         }
       })
       .catch((err) => {
         console.error('Error fetching opening momentum:', err);
-        if (isMounted) setLoading(false);
+        if (isMounted) {
+          setLoadError(err.userMessage || 'Could not load opening momentum.');
+          setLoading(false);
+        }
       });
 
     // Listen to real-time socket ticks
@@ -60,6 +67,7 @@ export default function OpeningMomentumScanner({
     const handleMomentumTick = (payload) => {
       if (isMounted && payload) {
         setData(payload);
+        setLoadError('');
         setLoading(false);
       }
     };
@@ -142,6 +150,11 @@ export default function OpeningMomentumScanner({
 
   return (
     <div className="space-y-4">
+      {loadError && (
+        <div className="rounded-xl border border-rose-800/70 bg-rose-950/40 px-3 py-2 text-xs text-rose-300">
+          {loadError}
+        </div>
+      )}
       {/* Compact scanner summary — single dense strip */}
       <div className="rounded-lg border border-slate-800/70 bg-slate-900/40 px-3 py-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">

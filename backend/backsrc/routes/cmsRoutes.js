@@ -12,17 +12,17 @@ const DEFAULT_CMS_PAGES = [
 
 Last updated: November 6, 2026
 
-OrderBlock ("we", "our", or "us") respects your privacy. This policy explains how we collect, use, and protect information when you use our Smart Money Concepts trading analytics platform.
+Tradrift ("we", "our", or "us") respects your privacy. This policy explains how we collect, use, and protect information when you use our Smart Money Concepts trading analytics platform.
 
 ### 1. Information We Collect
 - Account details such as name, email address, and date of birth
 - Subscription and billing-related information
-- Usage data from the terminal, journal, and dashboard features
+- Usage data from the terminal and dashboard features
 - Technical data such as IP address, browser type, and device information
 
 ### 2. How We Use Your Information
 - To create and manage your trader account
-- To provide live market analytics, journal, and membership services
+- To provide live market analytics and membership services
 - To improve platform performance and security
 - To send important service or membership communications
 
@@ -36,7 +36,7 @@ We use industry-standard safeguards including encrypted sessions and access cont
 You may request access, correction, or deletion of your personal data by contacting support through the Contact page.
 
 ### 6. Contact
-For privacy questions, reach us via the Contact page on OrderBlock.`,
+For privacy questions, reach us via the Contact page on Tradrift.`,
     faqItems: [],
     isPublished: true
   },
@@ -47,13 +47,13 @@ For privacy questions, reach us via the Contact page on OrderBlock.`,
 
 Last updated: November 6, 2026
 
-By creating an account or using OrderBlock, you agree to these Terms & Conditions.
+By creating an account or using Tradrift, you agree to these Terms & Conditions.
 
 ### 1. Eligibility
 You must be at least 18 years old and legally able to enter into this agreement to use the platform.
 
 ### 2. Nature of Service
-OrderBlock provides educational and analytical tools related to Smart Money Concepts, order blocks, liquidity, and market structure. We do **not** provide investment advice, brokerage services, or guaranteed trading profits.
+Tradrift provides educational and analytical tools related to Smart Money Concepts, order blocks, liquidity, and market structure. We do **not** provide investment advice, brokerage services, or guaranteed trading profits.
 
 ### 3. Account Responsibility
 You are responsible for keeping your login credentials secure and for all activity under your account.
@@ -68,7 +68,7 @@ Paid plans and free trials are subject to the pricing and duration shown at sign
 Trading in futures and options involves substantial risk of loss. Past performance does not guarantee future results. You alone are responsible for your trading decisions.
 
 ### 7. Limitation of Liability
-To the maximum extent permitted by law, OrderBlock is not liable for trading losses, indirect damages, or service interruptions beyond our reasonable control.
+To the maximum extent permitted by law, Tradrift is not liable for trading losses, indirect damages, or service interruptions beyond our reasonable control.
 
 ### 8. Changes
 We may update these terms from time to time. Continued use of the platform after updates means you accept the revised terms.
@@ -84,9 +84,9 @@ Questions about these terms can be sent through the Contact page.`,
     content: '',
     faqItems: [
       {
-        question: 'What is OrderBlock?',
+        question: 'What is Tradrift?',
         answer:
-          'OrderBlock is an institutional Smart Money Concepts (SMC) analytics terminal for Indian F&O markets, covering order blocks, FVGs, liquidity sweeps, Market X-Ray, and a trading journal.'
+          'Tradrift is an institutional Smart Money Concepts (SMC) analytics terminal for Indian F&O markets, covering order blocks, FVGs, liquidity sweeps, and Market X-Ray.'
       },
       {
         question: 'Who can create an account?',
@@ -96,12 +96,12 @@ Questions about these terms can be sent through the Contact page.`,
       {
         question: 'Is this investment advice?',
         answer:
-          'No. OrderBlock provides analytics and education tools. All trading decisions and risk remain solely with you.'
+          'No. Tradrift provides analytics and education tools. All trading decisions and risk remain solely with you.'
       },
       {
         question: 'What is included in the free trial?',
         answer:
-          'New traders get a 14-day institutional trial with access to the live terminal, Market X-Ray, and journal features based on the trial plan limits.'
+          'New traders get a 14-day institutional trial with access to the live terminal and Market X-Ray based on the trial plan limits.'
       },
       {
         question: 'How do I cancel or manage my plan?',

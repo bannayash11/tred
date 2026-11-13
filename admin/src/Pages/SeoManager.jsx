@@ -281,7 +281,7 @@ export default function SeoManager() {
                   {form.metaTitle || 'Page title will appear here'}
                 </div>
                 <div className="text-[12px] text-emerald-500/90 truncate">
-                  {`https://orderblock.local${form.canonicalUrl || form.path || '/'}`}
+                  {`https://tradrift.local${form.canonicalUrl || form.path || '/'}`}
                 </div>
                 <div className="text-[12px] text-slate-400 line-clamp-2">
                   {form.metaDescription || 'Meta description preview appears here for Google-style snippets.'}
@@ -411,13 +411,6 @@ export default function SeoManager() {
                     placeholder='{"@context":"https://schema.org","@type":"WebPage",...}'
                     className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-amber-400 focus:outline-none font-mono text-[11px]"
                   />
-                  {selected.pageKey === 'blog-detail' && (
-                    <p className="text-[10px] text-amber-400/80 mt-1.5">
-                      Tip: use placeholders <code className="text-amber-300">{'{title}'}</code>,{' '}
-                      <code className="text-amber-300">{'{excerpt}'}</code>,{' '}
-                      <code className="text-amber-300">{'{id}'}</code> — they are replaced on blog article pages.
-                    </p>
-                  )}
                 </div>
 
                 <div>

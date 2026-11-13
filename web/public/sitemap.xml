@@ -21,16 +21,6 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://violet-lark-104376.hostingersite.com/news</loc>
-    <changefreq>hourly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://violet-lark-104376.hostingersite.com/blog</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
     <loc>https://violet-lark-104376.hostingersite.com/faq</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>

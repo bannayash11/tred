@@ -1,5 +1,8 @@
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { getApiErrorMessage } from '../lib/apiError';
+
+export { getApiErrorMessage };
 
 const BACKEND_URL =
   typeof window !== 'undefined' &&
@@ -12,6 +15,7 @@ const TOKEN_KEY = 'tred_admin_token';
 
 export const api = axios.create({
   baseURL: API_BASE,
+  timeout: 25000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -35,18 +39,26 @@ api.interceptors.response.use(
         localStorage.removeItem('tred_admin_user');
       }
     }
+    error.userMessage = getApiErrorMessage(error);
     return Promise.reject(error);
   }
 );
 
 let socket = null;
 export const getSocket = () => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (socket && socket.__authToken !== token) {
+    socket.disconnect();
+    socket = null;
+  }
   if (!socket) {
     socket = io(BACKEND_URL || undefined, {
+      auth: { token },
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000
     });
+    socket.__authToken = token;
   }
   return socket;
 };
@@ -56,14 +68,13 @@ export const fetchMarketXRay = () => api.get('/screener/market-xray').then((res)
 export const fetchStock = (symbol) => api.get(`/screener/stock/${symbol}`).then((res) => res.data);
 export const fetchPublicAnnouncement = () => api.get('/admin/public-announcement').then((res) => res.data);
 
-export const fetchJournal = () => api.get('/journal').then((res) => res.data);
-export const createTrade = (tradeData) => api.post('/journal', tradeData).then((res) => res.data);
-export const removeTrade = (id) => api.delete(`/journal/${id}`).then((res) => res.data);
-
 export const fetchAdminData = () => api.get('/admin/overview').then((res) => res.data);
 export const updateUserSub = (id, data) => api.post(`/admin/users/${id}/subscription`, data).then((res) => res.data);
 export const updateBrokerConfig = (data) => api.post('/admin/settings/broker', data).then((res) => res.data);
 export const updateAnnouncementConfig = (data) => api.post('/admin/settings/announcement', data).then((res) => res.data);
+export const updateByokSalesConfig = (data) => api.post('/admin/settings/byok', data).then((res) => res.data);
+export const updateFreeTrialConfig = (data) =>
+  api.post('/admin/settings/free-trial', data).then((res) => res.data);
 
 // Opening 5-Minute Momentum Scanner API
 export const fetchOpeningMomentumSettings = () => api.get('/admin/opening-momentum/settings').then((res) => res.data);
@@ -81,3 +92,7 @@ export const loginApi = (data) => api.post('/auth/login', data).then((res) => re
 export const adminLoginApi = (data) => api.post('/auth/admin-login', data).then((res) => res.data);
 export const registerApi = (data) => api.post('/auth/register', data).then((res) => res.data);
 export const getMe = () => api.get('/auth/me').then((res) => res.data);
+
+/** Razorpay admin payment tracking */
+export const fetchAdminPayments = (params = {}) =>
+  api.get('/payment/admin/all', { params }).then((res) => res.data);

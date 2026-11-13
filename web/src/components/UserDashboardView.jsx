@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import {
   User,
@@ -17,11 +17,38 @@ import {
   AlertTriangle,
   LogOut,
   RefreshCw,
-  QrCode
+  QrCode,
+  XCircle,
+  Loader2
 } from 'lucide-react';
-import { updatePasswordApi, toggle2FAApi, revokeSessionsApi } from '../services/api';
-import { setTwoFactor, revokeOtherSessions } from '../store/slices/authSlice';
+import {
+  updatePasswordApi,
+  toggle2FAApi,
+  revokeSessionsApi,
+  fetchMyPaymentHistory,
+  cancelMembershipApi
+} from '../services/api';
+import { setTwoFactor, revokeOtherSessions, updateUser } from '../store/slices/authSlice';
 import ConfirmModal from './ConfirmModal';
+
+function formatInr(value) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
 
 export default function UserDashboardView({ onOpenPricing }) {
   const dispatch = useDispatch();
@@ -37,6 +64,7 @@ export default function UserDashboardView({ onOpenPricing }) {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordFieldErrors, setPasswordFieldErrors] = useState({});
 
   // 2FA modal / toggle state
   const [toggling2FA, setToggling2FA] = useState(false);
@@ -48,6 +76,45 @@ export default function UserDashboardView({ onOpenPricing }) {
   const [sessionsNotice, setSessionsNotice] = useState('');
   const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
 
+  // Payments + cancel membership
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(true);
+  const [paymentsError, setPaymentsError] = useState('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const loadPayments = useCallback(async () => {
+    setPaymentsLoading(true);
+    setPaymentsError('');
+    try {
+      const res = await fetchMyPaymentHistory({ limit: 20 });
+      setPayments(res.payments || []);
+    } catch (err) {
+      setPaymentsError(err.userMessage || err.message || 'Could not load payment history.');
+    } finally {
+      setPaymentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) loadPayments();
+  }, [user, loadPayments]);
+
+  const handleCancelMembership = async () => {
+    setCancelling(true);
+    try {
+      const res = await cancelMembershipApi({ reason: 'User cancelled from dashboard' });
+      if (res.user) dispatch(updateUser(res.user));
+      setNotice('Membership cancelled. Renew anytime from Pricing.');
+      setShowCancelConfirm(false);
+    } catch (err) {
+      setError(err.userMessage || err.response?.data?.message || 'Could not cancel membership.');
+      setShowCancelConfirm(false);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   if (!user) {
     return (
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center text-sm text-slate-400">
@@ -58,6 +125,8 @@ export default function UserDashboardView({ onOpenPricing }) {
 
   const planName = user?.subscription?.plan || '14-Day Free Trial';
   const status = user?.subscription?.status || 'trial';
+  const feedMode = user?.subscription?.mode || 'trial';
+  const byokStatus = user?.byok?.status || 'none';
   const expiresAt = user?.subscription?.expiresAt
     ? new Date(user.subscription.expiresAt)
     : new Date(Date.now() + 14 * 24 * 3600 * 1000);
@@ -69,17 +138,20 @@ export default function UserDashboardView({ onOpenPricing }) {
     e.preventDefault();
     setError('');
     setNotice('');
+    setPasswordFieldErrors({});
 
-    if (!oldPassword) {
-      setError('Current password is required for security verification.');
-      return;
+    const next = {};
+    if (!oldPassword) next.oldPassword = 'Current password is required.';
+    if (!newPassword || newPassword.length < 6) {
+      next.newPassword = 'New password must be at least 6 characters.';
     }
-    if (newPassword !== confirmPassword) {
-      setError('New passwords do not match.');
-      return;
+    if (!confirmPassword) next.confirmPassword = 'Please confirm your new password.';
+    else if (newPassword !== confirmPassword) {
+      next.confirmPassword = 'New passwords do not match.';
     }
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters.');
+    if (Object.keys(next).length) {
+      setPasswordFieldErrors(next);
+      setError(Object.values(next)[0]);
       return;
     }
 
@@ -94,11 +166,20 @@ export default function UserDashboardView({ onOpenPricing }) {
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
+        setPasswordFieldErrors({});
       } else {
-        setError(res.message || 'Failed to update password.');
+        const msg = res.message || 'Failed to update password.';
+        setError(msg);
+        setPasswordFieldErrors(
+          /current|old/i.test(msg) ? { oldPassword: msg } : { newPassword: msg }
+        );
       }
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Verification failed.');
+      const msg = err.userMessage || err.response?.data?.message || 'Could not update password. Please try again.';
+      setError(msg);
+      setPasswordFieldErrors(
+        /current|old|match/i.test(msg) ? { oldPassword: msg } : { newPassword: msg }
+      );
     } finally {
       setSavingPassword(false);
     }
@@ -114,10 +195,11 @@ export default function UserDashboardView({ onOpenPricing }) {
     try {
       await toggle2FAApi({ enabled: false });
       dispatch(setTwoFactor(false));
+      setError('');
       setOtpSuccessMsg('2FA Disabled.');
       setTimeout(() => setOtpSuccessMsg(''), 3000);
-    } catch {
-      dispatch(setTwoFactor(false));
+    } catch (err) {
+      setError(err.userMessage || err.response?.data?.message || 'Could not disable 2FA.');
     } finally {
       setToggling2FA(false);
     }
@@ -134,11 +216,11 @@ export default function UserDashboardView({ onOpenPricing }) {
       dispatch(setTwoFactor(true));
       setShow2FAPrompt(false);
       setOtpCode('');
+      setError('');
       setOtpSuccessMsg('✅ 2-Factor Authentication enabled! Account protected with OTP.');
       setTimeout(() => setOtpSuccessMsg(''), 4000);
-    } catch {
-      dispatch(setTwoFactor(true));
-      setShow2FAPrompt(false);
+    } catch (err) {
+      setError(err.userMessage || err.response?.data?.message || 'Could not enable 2FA. Please try again.');
     } finally {
       setToggling2FA(false);
     }
@@ -150,10 +232,11 @@ export default function UserDashboardView({ onOpenPricing }) {
       dispatch(revokeOtherSessions());
       setSessionsNotice('✅ All other device sessions successfully signed out.');
       setTimeout(() => setSessionsNotice(''), 3500);
-    } catch {
-      dispatch(revokeOtherSessions());
-      setSessionsNotice('✅ All other device sessions successfully signed out.');
-      setTimeout(() => setSessionsNotice(''), 3500);
+    } catch (err) {
+      setSessionsNotice(
+        err.userMessage || err.response?.data?.message || 'Could not revoke sessions. Please try again.'
+      );
+      setTimeout(() => setSessionsNotice(''), 4000);
     } finally {
       setShowRevokeConfirm(false);
     }
@@ -176,13 +259,26 @@ export default function UserDashboardView({ onOpenPricing }) {
           </p>
         </div>
 
-        <button
-          onClick={onOpenPricing}
-          className="flex items-center space-x-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2.5 text-xs font-bold text-black hover:opacity-90 transition-opacity shadow-lg shadow-amber-500/20"
-        >
-          <Sparkles className="h-4 w-4" />
-          <span>Upgrade Membership Tier</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenPricing}
+            className="flex items-center space-x-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2.5 text-xs font-bold text-black hover:opacity-90 transition-opacity shadow-lg shadow-amber-500/20"
+          >
+            <CreditCard className="h-4 w-4" />
+            <span>{isPro ? 'Renew / Change Plan' : 'Buy Membership · Pay Now'}</span>
+          </button>
+          {(status === 'active' || status === 'trial') && (
+            <button
+              type="button"
+              onClick={() => setShowCancelConfirm(true)}
+              className="flex items-center space-x-2 rounded-xl border border-rose-800/70 bg-rose-950/40 px-4 py-2.5 text-xs font-bold text-rose-300 hover:bg-rose-950/70"
+            >
+              <XCircle className="h-4 w-4" />
+              <span>Cancel Membership</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Grid: Membership Overview + Security Score */}
@@ -194,8 +290,18 @@ export default function UserDashboardView({ onOpenPricing }) {
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Current Active Subscription
               </span>
-              <h2 className="text-2xl font-extrabold text-white flex items-center">
+              <h2 className="text-2xl font-extrabold text-white flex items-center gap-2 flex-wrap">
                 {planName}
+                {feedMode === 'byok' && (
+                  <span className="rounded-full bg-violet-950/80 text-violet-300 border border-violet-800/60 px-2 py-0.5 text-[10px] font-bold">
+                    BYOK{byokStatus === 'connected' ? ' · linked' : ''}
+                  </span>
+                )}
+                {feedMode === 'server' && status === 'active' && (
+                  <span className="rounded-full bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 text-[10px] font-bold">
+                    SERVER FEED
+                  </span>
+                )}
               </h2>
             </div>
 
@@ -274,21 +380,30 @@ export default function UserDashboardView({ onOpenPricing }) {
               <div className="flex items-center space-x-2.5 rounded-xl bg-slate-950/50 p-2.5 border border-slate-800/60">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
                 <span className="text-slate-200">
-                  {isPro ? 'Unlimited Trade Log Entries' : 'Up to 5 Trade Log Entries (Trial)'}
-                </span>
-              </div>
-
-              <div className="flex items-center space-x-2.5 rounded-xl bg-slate-950/50 p-2.5 border border-slate-800/60">
-                {isPro ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                ) : (
-                  <Lock className="h-4 w-4 text-slate-500 shrink-0" />
-                )}
-                <span className={isPro ? 'text-slate-200' : 'text-slate-500'}>
                   {isPro ? 'VIP Discord Trading Community' : 'VIP Community (Pro Only)'}
                 </span>
               </div>
             </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onOpenPricing}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-[11px] font-bold text-black hover:bg-amber-400"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {isPro ? 'Renew on Razorpay' : 'Go to Payment Methods'}
+            </button>
+            {(status === 'active' || status === 'trial') && (
+              <button
+                type="button"
+                onClick={() => setShowCancelConfirm(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 px-3.5 py-2 text-[11px] font-semibold text-slate-300 hover:border-rose-700 hover:text-rose-300"
+              >
+                Cancel plan
+              </button>
+            )}
           </div>
         </div>
 
@@ -400,6 +515,104 @@ export default function UserDashboardView({ onOpenPricing }) {
         </div>
       )}
 
+      {/* Payment History */}
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center">
+              <CreditCard className="mr-2 h-4 w-4 text-amber-400" />
+              Payment History
+            </h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Your Razorpay orders — membership activates only after status is Paid.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadPayments}
+            className="inline-flex items-center gap-1.5 self-start rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 hover:text-amber-300"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${paymentsLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+
+        {paymentsError && (
+          <div className="rounded-xl border border-rose-800/60 bg-rose-950/40 px-3 py-2 text-xs text-rose-300">
+            {paymentsError}
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-2xl border border-slate-800">
+          <table className="min-w-full text-left text-xs">
+            <thead className="bg-slate-950/80 text-[10px] uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="px-3 py-2.5 font-semibold">Date</th>
+                <th className="px-3 py-2.5 font-semibold">Plan</th>
+                <th className="px-3 py-2.5 font-semibold">Order / Payment</th>
+                <th className="px-3 py-2.5 font-semibold">Amount</th>
+                <th className="px-3 py-2.5 font-semibold">Method</th>
+                <th className="px-3 py-2.5 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/80">
+              {paymentsLoading && (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Loading payments…
+                    </span>
+                  </td>
+                </tr>
+              )}
+              {!paymentsLoading && payments.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                    No payments yet.{' '}
+                    <button type="button" onClick={onOpenPricing} className="text-amber-400 underline">
+                      Buy a membership
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {!paymentsLoading &&
+                payments.map((p) => (
+                  <tr key={p._id || p.orderId} className="hover:bg-slate-950/40">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-300">
+                      {formatDateTime(p.createdAt)}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-200">{p.planName || p.planId || '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-mono text-[10px] text-slate-300">{p.orderId}</div>
+                      <div className="font-mono text-[10px] text-slate-500">
+                        {p.paymentId || '—'}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 font-bold text-white">
+                      {formatInr(p.amount)}
+                    </td>
+                    <td className="px-3 py-2.5 uppercase text-slate-300">{p.paymentMethod || '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          p.status === 'paid'
+                            ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400'
+                            : p.status === 'failed'
+                              ? 'border-rose-500/30 bg-rose-500/15 text-rose-400'
+                              : 'border-amber-500/30 bg-amber-500/15 text-amber-400'
+                        }`}
+                      >
+                        {p.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Bottom Grid: Change Password + Active Sessions Manager */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 3: Secure Password Change Form */}
@@ -417,13 +630,8 @@ export default function UserDashboardView({ onOpenPricing }) {
               {notice}
             </div>
           )}
-          {error && (
-            <div className="rounded-xl bg-rose-950/80 p-3 text-xs text-rose-400 border border-rose-800/50">
-              {error}
-            </div>
-          )}
 
-          <form onSubmit={handlePasswordChange} className="space-y-3 text-xs">
+          <form onSubmit={handlePasswordChange} className="space-y-3 text-xs" noValidate>
             <div>
               <label className="text-slate-400 block mb-1">
                 Current Password
@@ -433,9 +641,24 @@ export default function UserDashboardView({ onOpenPricing }) {
                 required
                 placeholder="Enter current password"
                 value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setOldPassword(e.target.value);
+                  if (passwordFieldErrors.oldPassword) {
+                    setPasswordFieldErrors({});
+                    setError('');
+                  }
+                }}
+                className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border focus:outline-none ${
+                  passwordFieldErrors.oldPassword
+                    ? 'border-rose-600 focus:border-rose-500'
+                    : 'border-slate-800 focus:border-cyan-500'
+                }`}
               />
+              {passwordFieldErrors.oldPassword && (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">
+                  {passwordFieldErrors.oldPassword}
+                </p>
+              )}
             </div>
 
             <div>
@@ -445,9 +668,24 @@ export default function UserDashboardView({ onOpenPricing }) {
                 required
                 placeholder="Min 6 characters"
                 value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  if (passwordFieldErrors.newPassword) {
+                    setPasswordFieldErrors({});
+                    setError('');
+                  }
+                }}
+                className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border focus:outline-none ${
+                  passwordFieldErrors.newPassword
+                    ? 'border-rose-600 focus:border-rose-500'
+                    : 'border-slate-800 focus:border-cyan-500'
+                }`}
               />
+              {passwordFieldErrors.newPassword && (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">
+                  {passwordFieldErrors.newPassword}
+                </p>
+              )}
             </div>
 
             <div>
@@ -457,9 +695,24 @@ export default function UserDashboardView({ onOpenPricing }) {
                 required
                 placeholder="Repeat new password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 p-2.5 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  if (passwordFieldErrors.confirmPassword) {
+                    setPasswordFieldErrors({});
+                    setError('');
+                  }
+                }}
+                className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border focus:outline-none ${
+                  passwordFieldErrors.confirmPassword
+                    ? 'border-rose-600 focus:border-rose-500'
+                    : 'border-slate-800 focus:border-cyan-500'
+                }`}
               />
+              {passwordFieldErrors.confirmPassword && (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">
+                  {passwordFieldErrors.confirmPassword}
+                </p>
+              )}
             </div>
 
             <button
@@ -541,6 +794,17 @@ export default function UserDashboardView({ onOpenPricing }) {
         danger
         onCancel={() => setShowRevokeConfirm(false)}
         onConfirm={handleRevokeOtherSessions}
+      />
+
+      <ConfirmModal
+        open={showCancelConfirm}
+        title="Cancel membership?"
+        message="Terminal and premium tools will lock immediately. Past payments stay in your history. You can buy again anytime from Pricing (Razorpay)."
+        confirmLabel={cancelling ? 'Cancelling…' : 'Yes, Cancel Membership'}
+        cancelLabel="Keep Membership"
+        danger
+        onCancel={() => !cancelling && setShowCancelConfirm(false)}
+        onConfirm={handleCancelMembership}
       />
     </div>
   );

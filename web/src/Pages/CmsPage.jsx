@@ -139,7 +139,9 @@ export default function CmsPage({ slug: slugProp }) {
         if (res.success && res.page) setPage(res.page);
         else setError('Page not found');
       })
-      .catch(() => setError('Failed to load page'))
+      .catch((err) =>
+        setError(err?.userMessage || err?.response?.data?.message || 'Failed to load page')
+      )
       .finally(() => setLoading(false));
   }, [slug]);
 

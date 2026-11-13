@@ -6,19 +6,45 @@ export default function Contact() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const clearErrors = () => setFieldErrors({});
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    const next = {};
+    if (!String(name).trim()) next.name = 'Please enter your name.';
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) next.email = 'Please enter your email.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      next.email = 'Please enter a valid email address.';
+    }
+    if (!String(message).trim()) next.message = 'Please enter your message.';
+    else if (String(message).trim().length < 10) {
+      next.message = 'Message should be at least 10 characters.';
+    }
+
+    if (Object.keys(next).length) {
+      setFieldErrors(next);
+      return;
+    }
+
+    setEmail(normalizedEmail);
     setSubmitted(true);
     setName('');
     setEmail('');
     setMessage('');
+    clearErrors();
     setTimeout(() => setSubmitted(false), 5000);
   };
 
+  const border = (field) =>
+    fieldErrors[field]
+      ? 'border-rose-600 focus:border-rose-500'
+      : 'border-slate-800 focus:border-cyan-500';
+
   return (
     <div className="max-w-5xl mx-auto space-y-12 py-6">
-      {/* Header */}
       <div className="text-center space-y-3 max-w-2xl mx-auto">
         <div className="inline-flex items-center space-x-2 rounded-full bg-cyan-950 px-3.5 py-1 text-xs font-bold text-cyan-400 border border-cyan-800">
           <MessageSquare className="h-3.5 w-3.5" />
@@ -33,7 +59,6 @@ export default function Contact() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-        {/* Contact Info */}
         <div className="space-y-6">
           <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 space-y-4">
             <h3 className="text-base font-bold text-white">Direct Contacts</h3>
@@ -45,7 +70,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Email Desk</div>
-                  <div className="font-semibold text-white">support@orderblock.local</div>
+                  <div className="font-semibold text-white">support@tradrift.local</div>
                 </div>
               </div>
 
@@ -79,7 +104,6 @@ export default function Contact() {
           </div>
         </div>
 
-        {/* Contact Form */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 sm:p-8 space-y-4 shadow-xl">
           <h3 className="text-base font-bold text-white">Send a Message</h3>
 
@@ -90,7 +114,7 @@ export default function Contact() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          <form onSubmit={handleSubmit} className="space-y-4 text-xs" noValidate>
             <div>
               <label className="text-slate-400 block mb-1">Your Name</label>
               <input
@@ -98,9 +122,15 @@ export default function Contact() {
                 required
                 placeholder="Rahul Mehta"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 p-3 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (fieldErrors.name) clearErrors();
+                }}
+                className={`w-full rounded-xl bg-slate-950 p-3 text-white border focus:outline-none ${border('name')}`}
               />
+              {fieldErrors.name && (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">{fieldErrors.name}</p>
+              )}
             </div>
 
             <div>
@@ -108,11 +138,22 @@ export default function Contact() {
               <input
                 type="email"
                 required
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="rahul@trading.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 p-3 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setEmail(e.target.value.toLowerCase());
+                  if (fieldErrors.email) clearErrors();
+                }}
+                className={`w-full rounded-xl bg-slate-950 p-3 text-white border focus:outline-none ${border('email')}`}
               />
+              {fieldErrors.email ? (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">{fieldErrors.email}</p>
+              ) : (
+                <p className="mt-1 text-[10px] text-slate-500">Email is not case-sensitive (Y and y are the same).</p>
+              )}
             </div>
 
             <div>
@@ -122,9 +163,15 @@ export default function Contact() {
                 rows={4}
                 placeholder="How can our institutional trading desk assist you?"
                 value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 p-3 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setMessage(e.target.value);
+                  if (fieldErrors.message) clearErrors();
+                }}
+                className={`w-full rounded-xl bg-slate-950 p-3 text-white border focus:outline-none ${border('message')}`}
               />
+              {fieldErrors.message && (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">{fieldErrors.message}</p>
+              )}
             </div>
 
             <button
@@ -140,4 +187,3 @@ export default function Contact() {
     </div>
   );
 }
-

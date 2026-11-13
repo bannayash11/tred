@@ -152,7 +152,7 @@ const levelPair = (first: FlowLevel | null, second: FlowLevel | null, letter: st
  * 15m), the zone as a box over its time and price, and the option levels as
  * rules labelled at the right when they sit near the session's range.
  */
-function MiniChart({ stock, window: win }: { stock: FlowStock; window: MarketFlow['window'] }) {
+export function MiniChart({ stock, window: win }: { stock: FlowStock; window: MarketFlow['window'] }) {
   const [ref, box] = useBox<HTMLDivElement>();
   const candles = windowCandles(stock);
   const note = stock.futures === 'pending' ? 'Loading future…' : stock.futures === 'failed' ? 'Could not load future' : stock.futures === 'unavailable' ? 'No future listed for this underlying' : candles.length < 2 ? 'Too few minutes yet for a line' : null;

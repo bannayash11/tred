@@ -8,6 +8,7 @@ import { useFitScrollerHeight } from '@/hooks/useFitScrollerHeight';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import type { Underlying } from '@/lib/underlyings';
 import { FlowBoard, type FlowLayout } from './FlowBoard';
+import { FlowMobileView } from './FlowMobileView';
 import { FlowStatus } from './FlowStatus';
 import { DEFAULT_FLOW_SETTINGS, type FlowSettings } from './marketFlowModel';
 import { inUniverse, loadUniverse, saveUniverse, type FlowUniverse } from './nifty50';
@@ -81,6 +82,25 @@ export function MarketFlowPage({ universe }: MarketFlowPageProps) {
       <ThemeToggle onChange={theme => applyTheme(theme)} size="md" className="ui-flow-theme" />
     </>
   );
+
+  if (layout === 'phone') {
+    return (
+      <FlowMobileView
+        flow={flow}
+        universe={universe}
+        scope={scope}
+        setScope={setScope}
+        loading={loading}
+        error={error}
+        provider={provider}
+        market={market}
+        futuresRead={futuresRead}
+        futuresTotal={futuresTotal}
+        onRescan={rescan}
+        settings={CHART}
+      />
+    );
+  }
 
   return (
     <div className="ui-flow oi-design" data-window="day" data-universe={scope} data-layout={layout} data-fit={fits ? 'true' : undefined} ref={pageRef}>

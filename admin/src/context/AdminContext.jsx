@@ -1,5 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api, fetchAdminData, updateUserSub, updateBrokerConfig, updateAnnouncementConfig, fetchScreener, getMe } from '../services/api';
+import {
+  api,
+  fetchAdminData,
+  updateUserSub,
+  updateBrokerConfig,
+  updateAnnouncementConfig,
+  updateByokSalesConfig,
+  updateFreeTrialConfig,
+  fetchScreener,
+  getMe
+} from '../services/api';
 
 const AdminContext = createContext();
 
@@ -21,8 +31,6 @@ export function AdminProvider({ children }) {
 
   const [usersList, setUsersList] = useState([]);
   const [plansList, setPlansList] = useState([]);
-  const [newsList, setNewsList] = useState([]);
-  const [blogsList, setBlogsList] = useState([]);
   const [seoPages, setSeoPages] = useState([]);
   const [cmsPages, setCmsPages] = useState([]);
   const [screenerData, setScreenerData] = useState(null);
@@ -31,7 +39,10 @@ export function AdminProvider({ children }) {
     dhanClientId: '1100293847',
     dhanToken: '••••••••••••••••••••••••••••••••',
     announcement: '🔴 Live Market Updates Active: High institutional volume detected in Nifty Banking & Auto sectors.',
-    announcementEnabled: true
+    announcementEnabled: true,
+    byokSalesEnabled: true,
+    freeTrialEnabled: false,
+    freeTrialDays: 14
   });
   const [toast, setToast] = useState('');
   const [loading, setLoading] = useState(false);
@@ -67,7 +78,19 @@ export function AdminProvider({ children }) {
             announcementEnabled:
               res.settings.announcementEnabled !== undefined
                 ? res.settings.announcementEnabled
-                : prev.announcementEnabled
+                : prev.announcementEnabled,
+            byokSalesEnabled:
+              res.settings.byokSalesEnabled !== undefined
+                ? res.settings.byokSalesEnabled
+                : prev.byokSalesEnabled,
+            freeTrialEnabled:
+              res.settings.freeTrialEnabled !== undefined
+                ? res.settings.freeTrialEnabled
+                : prev.freeTrialEnabled,
+            freeTrialDays:
+              res.settings.freeTrialDays !== undefined
+                ? res.settings.freeTrialDays
+                : prev.freeTrialDays
           }));
         }
       }
@@ -81,10 +104,6 @@ export function AdminProvider({ children }) {
     }
 
     try {
-      const blogsRes = await api.get('/content/blogs');
-      if (blogsRes.data.success) setBlogsList(blogsRes.data.blogs);
-      const newsRes = await api.get('/content/news');
-      if (newsRes.data.success) setNewsList(newsRes.data.news);
       const seoRes = await api.get('/seo/admin/pages');
       if (seoRes.data.success) setSeoPages(seoRes.data.pages || []);
       const cmsRes = await api.get('/cms/admin/pages');
@@ -244,78 +263,6 @@ export function AdminProvider({ children }) {
     showToast('Plan deleted successfully');
   };
 
-  // News CRUD
-  const createNews = async (newsData) => {
-    try {
-      const res = await api.post('/content/news', newsData);
-      if (res.data.success) {
-        setNewsList(prev => [res.data.news, ...prev]);
-        showToast('Breaking News wire published!');
-        return { success: true };
-      }
-    } catch {
-      const item = { id: `news_${Date.now()}`, time: 'Just now', source: 'Admin Desk', ...newsData };
-      setNewsList(prev => [item, ...prev]);
-      showToast('News published (Offline Mode)!');
-      return { success: true };
-    }
-  };
-
-  const updateNews = async (id, newsData) => {
-    try {
-      await api.put(`/content/news/${id}`, newsData);
-    } catch {}
-    setNewsList(prev => prev.map(n => n.id === id ? { ...n, ...newsData } : n));
-    showToast('News wire item updated!');
-  };
-
-  const deleteNews = async (id) => {
-    try {
-      await api.delete(`/content/news/${id}`);
-    } catch {}
-    setNewsList(prev => prev.filter(n => n.id !== id));
-    showToast('News item deleted');
-  };
-
-  // Blogs CRUD
-  const createBlog = async (blogData) => {
-    try {
-      const res = await api.post('/content/blogs', blogData);
-      if (res.data.success) {
-        setBlogsList(prev => [res.data.blog, ...prev]);
-        showToast('Educational Guide published!');
-        return { success: true };
-      }
-    } catch {
-      const item = {
-        id: `blog_${Date.now()}`,
-        date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-        author: 'OrderBlock Research Team',
-        readTime: '5 min read',
-        ...blogData
-      };
-      setBlogsList(prev => [item, ...prev]);
-      showToast('Guide published (Offline Mode)!');
-      return { success: true };
-    }
-  };
-
-  const updateBlog = async (id, blogData) => {
-    try {
-      await api.put(`/content/blogs/${id}`, blogData);
-    } catch {}
-    setBlogsList(prev => prev.map(b => b.id === id ? { ...b, ...blogData } : b));
-    showToast('Blog guide updated!');
-  };
-
-  const deleteBlog = async (id) => {
-    try {
-      await api.delete(`/content/blogs/${id}`);
-    } catch {}
-    setBlogsList(prev => prev.filter(b => b.id !== id));
-    showToast('Blog article deleted');
-  };
-
   // SEO CRUD
   const loadSeoPages = async () => {
     try {
@@ -433,6 +380,41 @@ export function AdminProvider({ children }) {
     }
   };
 
+  const saveByokSales = async (enabled) => {
+    try {
+      const res = await updateByokSalesConfig({ byokSalesEnabled: !!enabled });
+      setSystemSettings((prev) => ({
+        ...prev,
+        byokSalesEnabled: res.byokSalesEnabled !== undefined ? res.byokSalesEnabled : !!enabled
+      }));
+      showToast(res.message || (enabled ? 'BYOK sales ON' : 'BYOK sales OFF'));
+      return res;
+    } catch (err) {
+      showToast(err?.userMessage || err?.response?.data?.message || 'Could not update BYOK sales.');
+      throw err;
+    }
+  };
+
+  const saveFreeTrial = async ({ enabled, days } = {}) => {
+    try {
+      const res = await updateFreeTrialConfig({
+        freeTrialEnabled: enabled,
+        freeTrialDays: days
+      });
+      setSystemSettings((prev) => ({
+        ...prev,
+        freeTrialEnabled:
+          res.freeTrialEnabled !== undefined ? res.freeTrialEnabled : !!enabled,
+        freeTrialDays: res.freeTrialDays !== undefined ? res.freeTrialDays : days ?? prev.freeTrialDays
+      }));
+      showToast(res.message || (enabled ? 'Free trial ON' : 'Free trial OFF'));
+      return res;
+    } catch (err) {
+      showToast(err?.userMessage || err?.response?.data?.message || 'Could not update free trial.');
+      throw err;
+    }
+  };
+
   const stats = {
     totalUsers: usersList.length,
     activeSubscribers: usersList.filter(u => u.subscription?.status === 'active').length,
@@ -452,8 +434,6 @@ export function AdminProvider({ children }) {
         showLogoutConfirm,
         usersList,
         plansList,
-        newsList,
-        blogsList,
         seoPages,
         cmsPages,
         screenerData,
@@ -463,6 +443,8 @@ export function AdminProvider({ children }) {
         showToast,
         loading,
         refreshData: loadData,
+        saveByokSales,
+        saveFreeTrial,
         createUser,
         updateUser,
         deleteUser,
@@ -470,12 +452,6 @@ export function AdminProvider({ children }) {
         createPlan,
         updatePlan,
         deletePlan,
-        createNews,
-        updateNews,
-        deleteNews,
-        createBlog,
-        updateBlog,
-        deleteBlog,
         loadSeoPages,
         updateSeoPage,
         seedSeoPages,

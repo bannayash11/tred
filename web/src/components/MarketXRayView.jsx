@@ -26,7 +26,7 @@ import {
   AlertTriangle,
   Search
 } from 'lucide-react';
-export default function MarketXRayView({ xrayData, onSelectStock }) {
+export default function MarketXRayView({ xrayData, onSelectStock, errorMessage = '' }) {
   const activeData = xrayData || null;
 
   const [activeTab, setActiveTab] = useState('OVERVIEW'); // 'OVERVIEW' | 'SECTORS' | 'FII_DII' | 'OPTIONS_VIX'
@@ -35,8 +35,14 @@ export default function MarketXRayView({ xrayData, onSelectStock }) {
 
   if (!activeData) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-800 p-12 text-center text-sm text-slate-500">
-        No Market X-Ray data available. Waiting for live feed…
+      <div
+        className={`rounded-2xl border border-dashed p-12 text-center text-sm ${
+          errorMessage
+            ? 'border-rose-800/70 bg-rose-950/30 text-rose-300'
+            : 'border-slate-800 text-slate-500'
+        }`}
+      >
+        {errorMessage || 'No Market X-Ray data available. Waiting for live feed…'}
       </div>
     );
   }

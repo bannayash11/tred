@@ -8,15 +8,26 @@ import { execSync } from 'child_process';
 
 import authRoutes from './routes/authRoutes.js';
 import screenerRoutes from './routes/screenerRoutes.js';
-import journalRoutes from './routes/journalRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import contentRoutes from './routes/contentRoutes.js';
 import seoRoutes from './routes/seoRoutes.js';
 import cmsRoutes from './routes/cmsRoutes.js';
 import orderFlowRoutes from './routes/orderFlowRoutes.js';
+import directionalScannerRoutes from './routes/directionalScannerRoutes.js';
+import alphaMove2Routes from './routes/alphaMove2Routes.js';
+import paymentRoutes, { handlePaymentWebhook } from './routes/paymentRoutes.js';
 import { marketDataService } from './services/marketDataService.js';
 import { orderFlowService } from './services/orderFlowService.js';
 import { seedDefaultAdmin } from './utils/seedDefaultAdmin.js';
+import { JWT_SECRET, memoryUsers } from './middleware/authMiddleware.js';
+import { isSubscriptionActive } from './utils/security.js';
+import { User } from './models/User.js';
+import {
+  loadByokSettingsFromDb,
+  loadFreeTrialSettingsFromDb,
+  loadPlansFromDb
+} from './services/membershipPlans.js';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -34,6 +45,8 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:3004',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'https://violet-lark-104376.hostingersite.com',
+  'https://darkslateblue-dotterel-519318.hostingersite.com',
   ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean) : [])
 ];
 
@@ -57,6 +70,18 @@ app.use(
     credentials: true
   })
 );
+
+/**
+ * Razorpay webhook MUST receive the raw body for HMAC verification.
+ * Mount this BEFORE express.json() — otherwise req.body is already parsed
+ * and x-razorpay-signature checks will fail.
+ */
+app.post(
+  '/api/payment/webhook',
+  express.raw({ type: 'application/json' }),
+  handlePaymentWebhook
+);
+
 app.use(express.json());
 
 // Request logging
@@ -70,12 +95,14 @@ app.use((req, res, next) => {
 // Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/screener', screenerRoutes);
-app.use('/api/journal', journalRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/seo', seoRoutes);
 app.use('/api/cms', cmsRoutes);
 app.use('/api/order-flow', orderFlowRoutes);
+app.use('/api/directional-scanner', directionalScannerRoutes);
+app.use('/api/alpha-move-2', alphaMove2Routes);
+app.use('/api/payment', paymentRoutes);
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -87,28 +114,66 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Socket.io connection handling
-io.on('connection', (socket) => {
-  console.log(`[Socket.io] Client connected: ${socket.id}`);
+async function resolveSocketUser(token) {
+  if (!token || token === 'null' || token === 'undefined') return null;
+  if (token === 'demo-admin-token' || token === 'demo-user-token' || token === 'demo-subadmin-token') {
+    return null;
+  }
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+  try {
+    const user = await User.findById(decoded.id).select('-password');
+    if (user) return user;
+  } catch {
+    // DB offline
+  }
+  const mem = memoryUsers.get(String(decoded.id));
+  if (!mem) return null;
+  const { password: _pw, ...safe } = mem;
+  return safe;
+}
 
-  // Send immediate initial screener, market x-ray, and opening momentum payload
+// Socket.io — require JWT + active membership before market data
+io.use(async (socket, next) => {
+  try {
+    const token =
+      socket.handshake.auth?.token ||
+      (socket.handshake.headers.authorization || '').replace(/^Bearer\s+/i, '') ||
+      socket.handshake.query?.token;
+    const user = await resolveSocketUser(token);
+    if (!user) {
+      return next(new Error('Authentication required'));
+    }
+    if (!isSubscriptionActive(user)) {
+      return next(new Error('Active membership required'));
+    }
+    socket.data.user = user;
+    return next();
+  } catch (err) {
+    return next(new Error('Authentication required'));
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log(`[Socket.io] Client connected: ${socket.id} (${socket.data.user?.email || 'user'})`);
+
   socket.emit('INITIAL_STATE', {
     screener: marketDataService.getScreenerData(),
     marketXRay: marketDataService.getMarketXRay(),
     openingMomentum: marketDataService.getOpeningMomentumData()
   });
 
-  // Client requests continuous real-time priority ticks for a specific stock (e.g. Chart Modal)
   socket.on('SUBSCRIBE_STOCK', (symbol) => {
-    if (symbol) {
-      marketDataService.addPriorityStock(symbol);
-    }
+    if (!socket.data.user || !isSubscriptionActive(socket.data.user)) return;
+    if (symbol) marketDataService.addPriorityStock(symbol);
   });
 
   socket.on('UNSUBSCRIBE_STOCK', (symbol) => {
-    if (symbol) {
-      marketDataService.removePriorityStock(symbol);
-    }
+    if (symbol) marketDataService.removePriorityStock(symbol);
   });
 
   socket.on('disconnect', () => {
@@ -116,21 +181,71 @@ io.on('connection', (socket) => {
   });
 });
 
-// MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/orderblock_db';
-mongoose
-  .connect(MONGO_URI)
-  .then(async () => {
+// MongoDB Connection — must be a persistent URI (e.g. MongoDB Atlas) on live hosts.
+// Local 127.0.0.1 data is wiped if the server filesystem resets on each deploy.
+// Accept MONGO_URI or MONGODB_URI (Hostinger / common convention).
+const MONGO_URI =
+  process.env.MONGO_URI ||
+  process.env.MONGODB_URI ||
+  'mongodb://127.0.0.1:27017/tradrift_db';
+const isLiveHost =
+  process.env.NODE_ENV === 'production' ||
+  process.env.REQUIRE_MONGO === '1' ||
+  (!!MONGO_URI && !/127\.0\.0\.1|localhost/.test(MONGO_URI));
+
+async function connectMongo(attempt = 1) {
+  const maxAttempts = isLiveHost ? 8 : 3;
+  try {
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 8000
+    });
     console.log('[MongoDB] Connected successfully to database.');
     try {
       await seedDefaultAdmin();
     } catch (seedErr) {
       console.error('[Seed] Failed to seed default admin:', seedErr.message || seedErr);
     }
-  })
-  .catch((err) => {
-    console.warn('[MongoDB] Local MongoDB not detected or offline. Running in zero-config in-memory mode.');
-  });
+    try {
+      await Promise.all([
+        loadPlansFromDb(),
+        loadByokSettingsFromDb(),
+        loadFreeTrialSettingsFromDb()
+      ]);
+      console.log('[Membership] Plans + BYOK + free-trial settings loaded from DB.');
+    } catch (planErr) {
+      console.warn('[Membership] Using default in-memory plans:', planErr.message || planErr);
+    }
+  } catch (err) {
+    console.error(
+      `[MongoDB] Connection failed (attempt ${attempt}/${maxAttempts}):`,
+      err.message || err
+    );
+    if (attempt < maxAttempts) {
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 15000);
+      setTimeout(() => connectMongo(attempt + 1), delay);
+      return;
+    }
+    if (isLiveHost) {
+      console.error(
+        '[MongoDB] FATAL: Set a persistent MONGO_URI or MONGODB_URI (MongoDB Atlas recommended). ' +
+          'Without it, user accounts will not survive deploys.'
+      );
+      process.exit(1);
+    }
+    console.warn(
+      '[MongoDB] Offline. Auth requires DB unless ALLOW_MEMORY_AUTH=1 (dev only — data lost on restart).'
+    );
+  }
+}
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('[MongoDB] Disconnected — will rely on mongoose auto-reconnect.');
+});
+mongoose.connection.on('reconnected', () => {
+  console.log('[MongoDB] Reconnected.');
+});
+
+connectMongo();
 
 // Initialize Market Data & SMC Engine
 marketDataService.initialize(io);
@@ -181,7 +296,7 @@ function listenWithRetry(attempt = 0) {
   });
   server.listen(PORT, () => {
     console.log(`=======================================================`);
-    console.log(`🚀 OrderBlock Analytics Server running on port ${PORT}`);
+    console.log(`🚀 Tradrift Analytics Server running on port ${PORT}`);
     console.log(`📊 Real-Time SMC Engine Active with 30+ F&O Stocks`);
     console.log(`⚡ WebSocket / Socket.io server ready for connections`);
     console.log(`=======================================================`);

@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart } from 'lightweight-charts';
-import { X, TrendingUp, TrendingDown, Target, Shield, BookOpen, Layers, Check, Activity } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, Target, Shield, Layers, Activity } from 'lucide-react';
 import { fetchStock, getSocket } from '../services/api';
 
-export default function ChartModal({ symbol, onClose, onLogTrade }) {
+export default function ChartModal({ symbol, onClose }) {
   const chartContainerRef = useRef(null);
   const chartInstance = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -11,7 +11,6 @@ export default function ChartModal({ symbol, onClose, onLogTrade }) {
 
   const [stockData, setStockData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [loggedNotice, setLoggedNotice] = useState(false);
   const [livePrice, setLivePrice] = useState(null);
   const [liveChange, setLiveChange] = useState(null);
   const [priceFlash, setPriceFlash] = useState(null);
@@ -279,32 +278,6 @@ export default function ChartModal({ symbol, onClose, onLogTrade }) {
     };
   }, [stockData]);
 
-  const handleQuickJournal = () => {
-    if (!stockData) return;
-    const isBullish = Boolean(stockData.smcData?.activeBullishOB);
-    const ob = isBullish ? stockData.smcData.activeBullishOB : stockData.smcData.activeBearishOB;
-    const effectivePrice = livePrice ?? stockData.currentPrice;
-
-    const entry = {
-      symbol: stockData.symbol,
-      direction: isBullish ? 'BUY' : 'SELL',
-      setupType: 'ORDER_BLOCK',
-      entryPrice: effectivePrice,
-      stopLoss: ob ? (isBullish ? ob.bottom : ob.top) : effectivePrice * 0.99,
-      targetPrice: isBullish
-        ? stockData.smcData?.liquidity?.buySide?.price || effectivePrice * 1.02
-        : stockData.smcData?.liquidity?.sellSide?.price || effectivePrice * 0.98,
-      quantity: 50,
-      notes: `Institutional ${isBullish ? 'Bullish' : 'Bearish'} Order Block setup with score ${ob?.score || 80}/100`
-    };
-
-    if (onLogTrade) {
-      onLogTrade(entry);
-      setLoggedNotice(true);
-      setTimeout(() => setLoggedNotice(false), 2500);
-    }
-  };
-
   const currentDisplayPrice = livePrice ?? stockData?.currentPrice;
   const currentDisplayChange = liveChange ?? stockData?.change;
 
@@ -366,22 +339,6 @@ export default function ChartModal({ symbol, onClose, onLogTrade }) {
           </div>
 
           <div className="flex items-center space-x-3">
-            <button
-              onClick={handleQuickJournal}
-              className="flex items-center space-x-1.5 rounded-xl bg-cyan-500/20 px-3.5 py-1.5 text-xs font-semibold text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30 transition-colors"
-            >
-              {loggedNotice ? (
-                <>
-                  <Check className="h-4 w-4 text-emerald-400" />
-                  <span className="text-emerald-400">Logged to Journal!</span>
-                </>
-              ) : (
-                <>
-                  <BookOpen className="h-4 w-4" />
-                  <span>Log to Journal</span>
-                </>
-              )}
-            </button>
 
             <button
               onClick={onClose}

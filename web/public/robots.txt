@@ -1,8 +1,6 @@
-# OrderBlock X — https://violet-lark-104376.hostingersite.com
+# Tradrift — https://violet-lark-104376.hostingersite.com
 User-agent: *
 Allow: /
-Allow: /news
-Allow: /blog
 Allow: /pricing
 Allow: /about
 Allow: /about-us
@@ -17,8 +15,6 @@ Allow: /faq
 Disallow: /login
 Disallow: /register
 Disallow: /dashboard
-Disallow: /trade-log
-Disallow: /journal
 Disallow: /terminal
 Disallow: /momentum
 Disallow: /opening-momentum

@@ -49,7 +49,7 @@ export default function PricingModal({ onClose, user, onUpgradeSuccess }) {
                 Institutional Pro Terminal
               </h2>
               <p className="text-xs text-slate-400">
-                Full unrestricted access to minute-by-minute Order Block rankings, Liquidity sweep alerts, and Trading Journal.
+                Full unrestricted access to minute-by-minute Order Block rankings and Liquidity sweep alerts.
               </p>
             </div>
 
@@ -74,7 +74,7 @@ export default function PricingModal({ onClose, user, onUpgradeSuccess }) {
                 'Live 1-Minute Order Block & Liquidity Screener across 200+ F&O stocks',
                 'Automatic Institutional Demand & Supply Zone pop-up charts',
                 'Market X-Ray Macro Heatmap & Sector Flow indicator',
-                'Built-in Trading Journal with Expectancy & PnL analytics',
+                'Trader dashboard with membership & session controls',
                 'Desktop & Mobile responsive high-speed terminal',
                 'Free Future Updates & Discord VIP Community'
               ].map((feat, idx) => (

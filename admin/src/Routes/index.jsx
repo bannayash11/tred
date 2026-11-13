@@ -3,14 +3,13 @@ import { Route, Routes, Navigate } from 'react-router-dom';
 import AdminLayout from '../Layout/admin/AdminLayout';
 import Traders from '../Pages/Traders';
 import Plans from '../Pages/Plans';
-import News from '../Pages/News';
-import Blogs from '../Pages/Blogs';
 import BrokerApi from '../Pages/BrokerApi';
 import Broadcast from '../Pages/Broadcast';
 import LiveMonitor from '../Pages/LiveMonitor';
 import OpeningMomentumAdmin from '../Pages/OpeningMomentumAdmin';
 import SeoManager from '../Pages/SeoManager';
 import CmsPages from '../Pages/CmsPages';
+import AdminPayments from '../Pages/AdminPayments';
 import AdminLoginView from '../components/AdminLoginView';
 import { useAdmin } from '../context/AdminContext';
 
@@ -41,8 +40,7 @@ export default function AdminRoutes() {
         <Route index element={<Traders />} />
         <Route path="traders" element={<Traders />} />
         <Route path="plans" element={<Plans />} />
-        <Route path="news" element={<News />} />
-        <Route path="blogs" element={<Blogs />} />
+        <Route path="payments" element={<AdminPayments />} />
         <Route path="broker" element={<BrokerApi />} />
         <Route path="broadcast" element={<Broadcast />} />
         <Route path="monitor" element={<LiveMonitor />} />

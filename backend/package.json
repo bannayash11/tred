@@ -1,7 +1,7 @@
 {
-  "name": "tred-server",
+  "name": "tradrift-server",
   "version": "1.0.0",
-  "description": "Smart Money Concepts & Order Block Analytics Server",
+  "description": "Tradrift — Smart Money Concepts & Order Block Analytics Server",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
+    "razorpay": "^2.9.8",
     "socket.io": "^4.8.1",
     "ws": "^8.18.0"
   },

@@ -6,6 +6,29 @@
   color-scheme: dark;
 }
 
+/* Eliminate OS-level aggressive outlines (e.g. macOS pink/blue focus rings) across form controls */
+input,
+select,
+textarea,
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input:focus,
+input:focus-visible,
+select:focus,
+select:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+button:focus,
+button:focus-visible {
+  outline: none !important;
+  outline-color: transparent !important;
+  outline-width: 0 !important;
+  outline-style: none !important;
+  -webkit-focus-ring-color: transparent !important;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow-x: hidden;
@@ -137,8 +160,25 @@ html.light .bg-\[\#070b16\] {
 /* Cards, Modals, Drawers & Deep Slate Containers */
 html.light .bg-\[\#0a0f1d\],
 html.light .bg-\[\#090d16\],
-html.light .bg-\[\#0b1220\]\/55 {
+html.light .bg-\[\#0b1220\]\/55,
+html.light .bg-\[\#0c1222\],
+html.light .bg-\[\#0c1222\]\/90,
+html.light .bg-\[\#0c1322\],
+html.light .bg-\[\#0c1322\]\/90,
+html.light .bg-\[\#0e162a\],
+html.light .bg-\[\#0e162a\]\/70,
+html.light .bg-\[\#090e1a\],
+html.light .bg-\[\#090e1a\]\/90,
+html.light .bg-\[\#080d18\],
+html.light .bg-\[\#0f172a\],
+html.light .bg-\[\#0f172a\]\/90,
+html.light .bg-\[\#0b101d\],
+html.light .bg-\[\#0c1220\] {
   background-color: #ffffff !important;
+}
+
+html.light .bg-\[\#0e1628\] {
+  background-color: #f8fafc !important;
 }
 
 /* Tailwind Slate Backgrounds in Light Mode */
@@ -358,4 +398,16 @@ html.light .bg-gradient-to-br.from-slate-900\/90.via-slate-950.to-\[\#0a0f1d\],
 html.light .bg-gradient-to-r.from-slate-900.via-slate-950.to-\[\#0a1224\],
 html.light .bg-gradient-to-b.from-slate-900.via-slate-950.to-\[\#070b14\] {
   background-image: linear-gradient(to bottom, #ffffff, #f8fafc, #f1f5f9) !important;
+}
+
+/* Bottom Banner & Accent Gradients in Light Mode */
+html.light .bg-gradient-to-r.from-cyan-950.via-slate-900.to-blue-950,
+html.light .bg-gradient-to-r.from-cyan-950\/90.via-slate-900.to-blue-950\/90,
+html.light .from-cyan-950.via-slate-900.to-blue-950 {
+  background-image: linear-gradient(to right, #ecfeff, #f8fafc, #eff6ff) !important;
+  border-color: #bae6fd !important;
+}
+
+html.light .from-cyan-950\/30.to-slate-900\/60 {
+  background-image: linear-gradient(to bottom, #ecfeff, #f8fafc) !important;
 }

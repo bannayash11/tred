@@ -5,7 +5,6 @@ import Header from './Header';
 import Footer from './Footer';
 import AnnouncementBanner from '../../components/AnnouncementBanner';
 import MarketTickerBar from '../../components/MarketTickerBar';
-import PricingModal from '../../components/PricingModal';
 import ConfirmModal from '../../components/ConfirmModal';
 
 import {
@@ -14,8 +13,7 @@ import {
   fetchPublicAnnouncement,
   fetchPublicPlans,
   getMe,
-  getSocket,
-  createTrade
+  getSocket
 } from '../../services/api';
 import { updateUser, logout, loginSuccess } from '../../store/slices/authSlice';
 import { setScreenerData, setMarketXRay } from '../../store/slices/screenerSlice';
@@ -39,8 +37,11 @@ export default function PublicLayout() {
   const [announcement, setAnnouncement] = useState('');
   const [user, setUser] = useState(authUser);
 
-  const [showPricingModal, setShowPricingModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  /** Always send users to real Razorpay pricing — never the legacy fake modal */
+  const openPricing = () => navigate('/pricing');
+  const [apiBanner, setApiBanner] = useState('');
 
   const [liveUpdatedSymbols, setLiveUpdatedSymbols] = useState(new Set());
   const [niftyData, setNiftyData] = useState(null);
@@ -64,7 +65,10 @@ export default function PublicLayout() {
           );
         }
       })
-      .catch((err) => console.error('Screener fetch error:', err));
+      .catch((err) => {
+        console.error('Screener fetch error:', err);
+        setApiBanner(err.userMessage || 'Cannot load live screener right now.');
+      });
 
     fetchMarketXRay()
       .then((res) => {
@@ -73,7 +77,10 @@ export default function PublicLayout() {
           dispatch(setMarketXRay(res.data));
         }
       })
-      .catch((err) => console.error('X-Ray fetch error:', err));
+      .catch((err) => {
+        console.error('X-Ray fetch error:', err);
+        setApiBanner(err.userMessage || 'Cannot load Market X-Ray right now.');
+      });
 
     fetchPublicAnnouncement()
       .then((res) => {
@@ -87,9 +94,13 @@ export default function PublicLayout() {
       .then((res) => {
         if (res.success && res.plans) {
           dispatch(setPlans(res.plans));
+          setApiBanner('');
         }
       })
-      .catch((err) => console.error('Plans fetch error:', err));
+      .catch((err) => {
+        console.error('Plans fetch error:', err);
+        setApiBanner(err.userMessage || 'Cannot load membership plans right now.');
+      });
 
     if (authToken) {
       getMe()
@@ -100,29 +111,41 @@ export default function PublicLayout() {
             dispatch(loginSuccess({ user: res.user, token: authToken }));
           }
         })
-        .catch(() => {
-          dispatch(logout());
-          setUser(null);
+        .catch((err) => {
+          // Only wipe session on real auth failure — not deploy/network blips
+          const status = err?.response?.status;
+          if (status === 401 || status === 403) {
+            dispatch(logout());
+            setUser(null);
+            setApiBanner(err.userMessage || 'Session expired. Please sign in again.');
+          }
         });
     }
 
     const socket = getSocket();
 
+    const applyScreener = (screener) => {
+      if (!screener) return;
+      setScreenerDataState(screener);
+      dispatch(
+        setScreenerData({
+          all: screener.allStocks,
+          bullish: screener.bullishSetups,
+          bearish: screener.bearishSetups
+        })
+      );
+    };
+
     socket.on('INITIAL_STATE', (payload) => {
-      if (payload.screener) {
-        setScreenerDataState(payload.screener);
-        dispatch(
-          setScreenerData({
-            all: payload.screener.allStocks,
-            bullish: payload.screener.bullishSetups,
-            bearish: payload.screener.bearishSetups
-          })
-        );
-      }
+      applyScreener(payload.screener);
       if (payload.marketXRay) {
         setXrayDataState(payload.marketXRay);
         dispatch(setMarketXRay(payload.marketXRay));
       }
+    });
+
+    socket.on('SCREENER_UPDATE', (screener) => {
+      applyScreener(screener);
     });
 
     socket.on('MARKET_XRAY', (data) => {
@@ -174,6 +197,7 @@ export default function PublicLayout() {
 
     return () => {
       socket.off('INITIAL_STATE');
+      socket.off('SCREENER_UPDATE');
       socket.off('MARKET_TICK');
       socket.off('MARKET_XRAY');
     };
@@ -186,18 +210,6 @@ export default function PublicLayout() {
     setUser(null);
     setShowLogoutConfirm(false);
     navigate('/');
-  };
-
-  const handleLogTradeFromChart = async (tradeEntry) => {
-    if (!isAuthenticated) {
-      navigate('/login?next=/trade-log');
-      return;
-    }
-    try {
-      await createTrade(tradeEntry);
-    } catch (err) {
-      console.error('Error logging trade from chart:', err);
-    }
   };
 
   const openStockChart = (sym) => {
@@ -216,6 +228,20 @@ export default function PublicLayout() {
         <AnnouncementBanner text={announcement} onClose={() => setAnnouncement('')} />
       )}
 
+      {apiBanner && !isOrderFlow && (
+        <div className="bg-rose-950/90 border-b border-rose-800/80 text-rose-200 text-xs sm:text-sm px-4 py-2.5 flex items-start justify-between gap-3">
+          <span>{apiBanner}</span>
+          <button
+            type="button"
+            onClick={() => setApiBanner('')}
+            className="shrink-0 text-rose-300/80 hover:text-white"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {!isOrderFlow && (
         <MarketTickerBar
           niftyData={niftyData}
@@ -229,7 +255,7 @@ export default function PublicLayout() {
         <Header
           user={user}
           onOpenAuth={goToLogin}
-          onOpenPricing={() => setShowPricingModal(true)}
+          onOpenPricing={openPricing}
           onLogout={() => setShowLogoutConfirm(true)}
           niftyData={niftyData}
           bankNiftyData={bankNiftyData}
@@ -248,11 +274,10 @@ export default function PublicLayout() {
             screenerData: screenerDataState,
             xrayData: xrayDataState,
             onSelectStock: openStockChart,
-            onLogTrade: handleLogTradeFromChart,
             liveUpdatedSymbols,
             user,
             isAuthenticated,
-            onOpenPricing: () => setShowPricingModal(true),
+            onOpenPricing: openPricing,
             onOpenAuth: goToLogin
           }}
         />
@@ -260,17 +285,10 @@ export default function PublicLayout() {
 
       {!isOrderFlow && <Footer />}
 
-      {showPricingModal && (
-        <PricingModal
-          onClose={() => setShowPricingModal(false)}
-          currentPlan={user?.subscription?.plan}
-        />
-      )}
-
       <ConfirmModal
         open={showLogoutConfirm}
         title="Sign out?"
-        message="You will need to sign in again to access your Trade Log and dashboard."
+        message="You will need to sign in again to access your dashboard and terminal."
         confirmLabel="Sign Out"
         cancelLabel="Stay Signed In"
         danger

@@ -1,10 +1,39 @@
 import express from 'express';
-import { authMiddleware, subAdminOrAdmin } from '../middleware/authMiddleware.js';
+import zlib from 'zlib';
+import {
+  authMiddleware,
+  requireActiveSubscription,
+  subAdminOrAdmin
+} from '../middleware/authMiddleware.js';
 import { orderFlowService } from '../services/orderFlowService.js';
 
 const router = express.Router();
 
-router.use(authMiddleware);
+function sendCompressedJson(req, res, jsonStringOrBuffer) {
+  const acceptEncoding = req.headers['accept-encoding'] || '';
+  const buffer = Buffer.isBuffer(jsonStringOrBuffer)
+    ? jsonStringOrBuffer
+    : Buffer.from(jsonStringOrBuffer, 'utf8');
+
+  if (acceptEncoding.includes('gzip')) {
+    zlib.gzip(buffer, (err, gzipped) => {
+      if (err) {
+        res.type('application/json').send(buffer);
+      } else {
+        res.set({
+          'Content-Type': 'application/json',
+          'Content-Encoding': 'gzip',
+          'Vary': 'Accept-Encoding'
+        });
+        res.send(gzipped);
+      }
+    });
+  } else {
+    res.type('application/json').send(buffer);
+  }
+}
+
+router.use(authMiddleware, requireActiveSubscription);
 
 router.get('/status', (req, res) => {
   try {
@@ -36,7 +65,7 @@ router.get('/market', (req, res) => {
         retryAfter: 5
       });
     }
-    res.type('application/json').send(json);
+    sendCompressedJson(req, res, json);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -50,7 +79,19 @@ router.get('/market/:date/:hhmm', (req, res) => {
     }
     const body = orderFlowService.getMinuteFile(date, hhmm);
     if (!body) return res.status(404).json({ error: 'No such minute.' });
-    res.type('application/json').send(body);
+    sendCompressedJson(req, res, body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/futures-bundle', async (req, res) => {
+  try {
+    const session =
+      req.query.session ||
+      orderFlowService.getStatus().session;
+    const payload = orderFlowService.getFuturesBundle(session);
+    sendCompressedJson(req, res, JSON.stringify(payload));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

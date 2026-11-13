@@ -94,9 +94,9 @@ export default function OrderFlowBoard() {
       setError(null);
     } catch (err) {
       const msg =
+        err?.userMessage ||
         err?.response?.data?.error ||
         err?.response?.data?.message ||
-        err?.message ||
         'Failed to load Order Flow.';
       setError(msg);
       if (err?.response?.data?.provider) setStatus(err.response.data);

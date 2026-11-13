@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Zap, Shield, ExternalLink, Heart } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 
 export default function Footer() {
   return (
@@ -11,10 +11,14 @@ export default function Footer() {
           {/* Col 1: Brand */}
           <div className="md:col-span-2 space-y-3">
             <div className="flex items-center space-x-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-sm">
-                <Zap className="h-4 w-4 text-black fill-black" />
-              </div>
-              <span className="text-base font-extrabold text-white">ORDERBLOCK PRO</span>
+              <img
+                src="/brand/tradrift-logo.svg"
+                alt="Tradrift"
+                className="h-8 w-8 rounded-lg shadow-sm"
+              />
+              <span className="text-base font-extrabold text-white tracking-tight">
+                Trad<span className="text-cyan-400">rift</span>
+              </span>
             </div>
             <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
               India's premier institutional Smart Money Concepts (SMC) & Liquidity terminal for 200+ NSE F&O stocks. Built for serious intraday and swing traders.
@@ -36,7 +40,7 @@ export default function Footer() {
                 <Link to="/xray" className="hover:text-cyan-400 transition-colors">Market X-Ray Heatmap</Link>
               </li>
               <li>
-                <Link to="/trade-log" className="hover:text-cyan-400 transition-colors">Trade Log</Link>
+                <Link to="/dashboard" className="hover:text-cyan-400 transition-colors">Dashboard</Link>
               </li>
               <li>
                 <Link to="/pricing" className="hover:text-cyan-400 transition-colors">Pricing & Plans</Link>
@@ -44,21 +48,18 @@ export default function Footer() {
             </ul>
           </div>
 
-          {/* Col 3: Education & News */}
+          {/* Col 3: Company */}
           <div className="space-y-2.5">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-white">Knowledge Hub</h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-white">Company</h4>
             <ul className="space-y-2">
               <li>
-                <Link to="/blog" className="hover:text-cyan-400 transition-colors">SMC Educational Guides</Link>
+                <Link to="/about" className="hover:text-cyan-400 transition-colors">About</Link>
               </li>
               <li>
-                <Link to="/news" className="hover:text-cyan-400 transition-colors">Market Pulse News</Link>
+                <Link to="/contact" className="hover:text-cyan-400 transition-colors">Contact Support</Link>
               </li>
               <li>
-                <Link to="/about" className="hover:text-cyan-400 transition-colors">About Institutional SMC</Link>
-              </li>
-              <li>
-                <Link to="/contact" className="hover:text-cyan-400 transition-colors">Trading Desk Support</Link>
+                <Link to="/pricing" className="hover:text-cyan-400 transition-colors">Pricing</Link>
               </li>
             </ul>
           </div>
@@ -91,7 +92,7 @@ export default function Footer() {
         {/* Disclaimer & Copyright */}
         <div className="border-t border-slate-800/80 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-500">
           <div>
-            &copy; {new Date().getFullYear()} OrderBlock Pro Analytics. All Rights Reserved. Not SEBI Registered Investment Advisory. Educational & Analytical Platform.
+            &copy; {new Date().getFullYear()} Tradrift Analytics. All Rights Reserved. Not SEBI Registered Investment Advisory. Educational & Analytical Platform.
           </div>
           <div className="flex items-center space-x-4">
             <Link to="/privacy-policy" className="hover:underline">Privacy Policy</Link>

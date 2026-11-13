@@ -147,7 +147,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
                 <span className="h-3 w-3 rounded-full bg-rose-500/80 inline-block"></span>
                 <span className="h-3 w-3 rounded-full bg-amber-500/80 inline-block"></span>
                 <span className="h-3 w-3 rounded-full bg-emerald-500/80 inline-block"></span>
-                <span className="ml-2 font-mono text-[11px] text-slate-400">orderblock-terminal // kotak-neo-live-stream</span>
+                <span className="ml-2 font-mono text-[11px] text-slate-400">tradrift-terminal // kotak-neo-live-stream</span>
               </div>
               <div className="flex items-center space-x-2 text-[11px] font-mono text-emerald-400">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
@@ -264,7 +264,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             Everything You Need to Trade Like Institutional Big Money
           </h2>
           <p className="text-sm text-slate-400 max-w-2xl mx-auto">
-            Traditional retail indicators like RSI and MACD lag behind price. OrderBlock tracks actual orders and liquidity pools.
+            Traditional retail indicators like RSI and MACD lag behind price. Tradrift tracks actual orders and liquidity pools.
           </p>
         </div>
 
@@ -319,23 +319,23 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-950 text-amber-400 border border-amber-800/60">
               <BookOpen className="h-6 w-6" />
             </div>
-            <h3 className="text-xl font-bold text-white">4. Multi-Day Trade Log</h3>
+            <h3 className="text-xl font-bold text-white">4. Trader Dashboard</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Ditch complicated Excel spreadsheets. Log setups directly from the charts. The system tracks your win rate, expectancy curve, cumulative PnL, and discipline statistics automatically.
+              Manage membership, payments, sessions and account security from one place — renew plans, cancel access, and stay in control.
             </p>
             <div className="flex items-center space-x-2 text-xs font-mono text-amber-400">
               <CheckCircle2 className="h-4 w-4" />
-              <span>1-Click trade logging straight from chart modal</span>
+              <span>Membership, payments and security in one hub</span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ================= 4. RETAIL TRADER VS ORDERBLOCK COMPARISON ================= */}
+      {/* ================= 4. RETAIL TRADER VS TRADRIFT COMPARISON ================= */}
       <section className="mx-auto max-w-5xl px-4 space-y-8">
         <div className="text-center space-y-2">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-400">The Edge</span>
-          <h2 className="text-3xl font-extrabold text-white">Why Retail Traders Fail vs OrderBlock Traders</h2>
+          <h2 className="text-3xl font-extrabold text-white">Why Retail Traders Fail vs Tradrift Traders</h2>
         </div>
 
         <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/50">
@@ -355,7 +355,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
 
             <div className="p-6 bg-emerald-950/10 space-y-4">
               <div className="font-bold text-emerald-400 text-sm flex items-center space-x-2">
-                <span>✅ The OrderBlock Pro Way</span>
+                <span>✅ The Tradrift Way</span>
               </div>
               <ul className="space-y-3 text-slate-300">
                 <li>• Entering right at the base where institutions accumulated orders</li>
@@ -380,7 +380,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             12-Month Institutional Access Bundle
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-            Get full access to all terminal screeners, pop-up charts, community, and Trade Log at ~₹22/day.
+            Get full access to all terminal screeners, pop-up charts, and community at ~₹22/day.
           </p>
         </div>
 
@@ -407,7 +407,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
               'Minute-by-minute live Order Block screener for 200+ F&O stocks',
               'Auto-drawn demand & supply zone pop-up charts',
               'Market X-Ray macro breadth & sector flow',
-              'Full multi-day Trade Log with PnL metrics',
+              'Trader dashboard with membership & payments',
               'Free future updates & broker integration support'
             ].map((f, i) => (
               <div key={i} className="flex items-center space-x-2.5">
@@ -459,19 +459,19 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
 
       {/* ================= 7. BOTTOM BANNER CTA ================= */}
       <section className="mx-auto max-w-5xl px-4">
-        <div className="relative overflow-hidden rounded-3xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950 via-slate-900 to-blue-950 p-8 sm:p-12 text-center space-y-5">
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-white">
+        <div className="relative overflow-hidden rounded-3xl border border-cyan-500/25 dark:border-cyan-500/40 bg-gradient-to-r from-cyan-50 via-slate-50 to-blue-50 dark:from-cyan-950 dark:via-slate-900 dark:to-blue-950 p-8 sm:p-12 text-center space-y-5 shadow-xl shadow-cyan-500/5 dark:shadow-none">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">
             Ready to upgrade your trading edge?
           </h2>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-xl mx-auto">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-xl mx-auto leading-relaxed">
             Join professional traders tracking institutional liquidity footprints across the Indian market.
           </p>
           <div className="pt-2">
             <button
               onClick={onLaunchTerminal}
-              className="inline-flex items-center space-x-2 rounded-2xl bg-cyan-400 px-8 py-3.5 text-sm font-extrabold text-black hover:bg-cyan-300 transition-colors shadow-xl shadow-cyan-400/20"
+              className="inline-flex items-center space-x-2 rounded-2xl bg-cyan-500 hover:bg-cyan-400 px-8 py-3.5 text-sm font-extrabold text-slate-950 hover:brightness-105 active:scale-[0.99] transition-all shadow-xl shadow-cyan-500/25 cursor-pointer"
             >
-              <Zap className="h-4 w-4 fill-black" />
+              <Zap className="h-4 w-4 fill-slate-950" />
               <span>Launch Live Terminal Now</span>
             </button>
           </div>

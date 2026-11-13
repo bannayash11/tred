@@ -13,7 +13,7 @@ export default function About() {
       <div className="text-center space-y-4 max-w-3xl mx-auto">
         <div className="inline-flex items-center space-x-2 rounded-full bg-cyan-950 px-3.5 py-1 text-xs font-bold text-cyan-400 border border-cyan-800">
           <Shield className="h-3.5 w-3.5" />
-          <span>About OrderBlock Pro</span>
+          <span>About Tradrift</span>
         </div>
         <h1 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
           Democratizing <span className="text-cyan-400">Institutional Edge</span> for Indian Retail Traders
@@ -51,7 +51,7 @@ export default function About() {
           </div>
           <h3 className="text-lg font-bold text-white">Systematic Execution</h3>
           <p className="text-xs text-slate-400 leading-relaxed">
-            With integrated multi-day trade logging, risk-to-reward tracking, and macro sector heatmaps, traders achieve consistent profitability.
+            With macro sector heatmaps, order-block scanners, and clear risk-to-reward context, traders can focus on consistent setups.
           </p>
         </div>
       </div>

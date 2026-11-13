@@ -124,7 +124,7 @@ export const FlowDiagram = memo(function FlowDiagram({ flow, settings, status }:
 
 function DiagramBody({ flow, settings, status, W, H }: FlowDiagramProps & { W: number; H: number }) {
   const focus = useFlowFocus();
-  // Motion (owner, 26 Oct 2026: bring OrderBlock's animation in, in our
+  // Motion (owner, 26 Oct 2026: bring Tradrift's animation in, in our
   // theme): a halo at the origin, comets along the lead paths, a breathing
   // "now" edge. SMIL motion cannot be stopped from CSS, so the comets are
   // not drawn at all for a reader who asked for reduced motion.

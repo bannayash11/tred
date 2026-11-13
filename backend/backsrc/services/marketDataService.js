@@ -278,65 +278,95 @@ export class MarketDataService {
     void this.warmRealCandles();
   }
 
-  async warmRealCandles() {
-    // After hours: leave Kotak RPS for Order Flow day's futures fill (dense board).
-    const { isMarketSessionTime } = await import('./orderFlow/marketSession.js');
-    if (!isMarketSessionTime(Date.now())) {
-      console.log('[MarketDataService] Outside session — skipping candle warm (Order Flow priority).');
-      return;
-    }
-    // Wait for Order Flow futures warm + build so chart candles don't fight Kotak RPS
-    for (let i = 0; i < 180; i++) {
-      const busy = orderFlowService.state?.building || orderFlowService._prefetching;
-      if (!busy) break;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    console.log('[MarketDataService] Warming real 5m candles from Kotak (throttled)…');
-    let consecutive429 = 0;
-    const symbols = Array.from(this.stocks.values()).filter((s) => s.sector !== 'Indices');
-    // Indices + top liquid names first; rest fill later as charts open
-    const priority = ['NIFTY 50', 'BANKNIFTY', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN'];
-    const ordered = [
-      ...priority.map((sym) => this.stocks.get(sym)).filter(Boolean),
-      ...symbols.filter((s) => !priority.includes(s.symbol))
-    ].slice(0, 12);
+  broadcastScreener() {
+    if (!this.io) return;
+    const screener = this.getScreenerData();
+    this.io.emit('SCREENER_UPDATE', screener);
+    // Keep INITIAL_STATE consumers in sync without a page refresh.
+    this.io.emit('INITIAL_STATE', {
+      screener,
+      marketXRay: this.getMarketXRay(),
+      openingMomentum: this.getOpeningMomentumData()
+    });
+  }
 
-    for (const stock of ordered) {
-      if (consecutive429 >= 3) {
-        console.warn('[MarketDataService] Pausing candle warm after repeated 429s — charts will fetch on demand.');
-        break;
+  async warmRealCandles() {
+    if (this._warmingCandles) return;
+    this._warmingCandles = true;
+    try {
+      const { isMarketSessionTime } = await import('./orderFlow/marketSession.js');
+      const live = isMarketSessionTime(Date.now());
+      // Live session: Terminal screener needs candles now — don't wait on Order Flow forever.
+      // After hours: brief wait so Order Flow futures can claim RPS first.
+      const maxWait = live ? 20 : 120;
+      for (let i = 0; i < maxWait; i++) {
+        if (!orderFlowService._prefetching) break;
+        await new Promise((r) => setTimeout(r, 1000));
       }
-      const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
-      if (!mapping) continue;
-      try {
-        const realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
-          timeframe: '5m',
-          rangeDays: 2
-        });
-        consecutive429 = 0;
-        if (realCandles?.length) {
-          const candles = filterNseSessionCandles(realCandles, '5m');
-          if (candles.length) {
-            stock.candles = candles;
-            stock.hasRealCandles = true;
-            stock.high = Math.max(...candles.map((c) => c.high));
-            stock.low = Math.min(...candles.map((c) => c.low));
-            stock.smcData = smcEngine.analyze(candles, stock.symbol, '5m');
+      console.log('[MarketDataService] Warming real 5m candles from Kotak (throttled)…');
+      let consecutive429 = 0;
+      const symbols = Array.from(this.stocks.values()).filter((s) => s.sector !== 'Indices');
+      const priority = ['NIFTY 50', 'BANKNIFTY', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN'];
+      const ordered = [
+        ...priority.map((sym) => this.stocks.get(sym)).filter(Boolean),
+        ...symbols.filter((s) => !priority.includes(s.symbol))
+      ];
+      // Warm the full Terminal universe so Order Block screener can fill.
+      let warmed = 0;
+
+      for (const stock of ordered) {
+        if (stock.hasRealCandles && stock.smcData) continue;
+        if (consecutive429 >= 4) {
+          console.warn('[MarketDataService] Pausing candle warm after repeated 429s — will retry shortly.');
+          break;
+        }
+        const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
+        if (!mapping) continue;
+        try {
+          const realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
+            timeframe: '5m',
+            rangeDays: 2
+          });
+          consecutive429 = 0;
+          if (realCandles?.length) {
+            const candles = filterNseSessionCandles(realCandles, '5m');
+            if (candles.length) {
+              stock.candles = candles;
+              stock.hasRealCandles = true;
+              stock.high = Math.max(...candles.map((c) => c.high));
+              stock.low = Math.min(...candles.map((c) => c.low));
+              stock.smcData = smcEngine.analyze(candles, stock.symbol, '5m');
+              warmed += 1;
+              // Push setups to Terminal as soon as a few names have SMC.
+              if (warmed === 3 || warmed % 8 === 0) this.broadcastScreener();
+            }
           }
+        } catch (err) {
+          if (String(err.message || '').includes('429') || String(err.message || '').toLowerCase().includes('too many')) {
+            consecutive429 += 1;
+            await new Promise((r) => setTimeout(r, 5000));
+          }
+          console.warn(`[MarketDataService] Candle warm failed for ${stock.symbol}:`, err.message);
         }
-      } catch (err) {
-        if (String(err.message || '').includes('429') || String(err.message || '').toLowerCase().includes('too many')) {
-          consecutive429 += 1;
-          await new Promise((r) => setTimeout(r, 5000));
-        }
-        console.warn(`[MarketDataService] Candle warm failed for ${stock.symbol}:`, err.message);
+        await new Promise((r) => setTimeout(r, live ? 600 : 900));
       }
-      await new Promise((r) => setTimeout(r, 800));
+      console.log(`[MarketDataService] Real candle warm complete · ${warmed} stocks with SMC.`);
+      this.broadcastScreener();
+      openingMomentumService.ensureFrozen(this.stocks);
+      openingMomentumService.refineFreezeFromOpeningCandles(this.stocks);
+
+      // If 429 cut us short, retry the rest after a cool-down (no page refresh needed).
+      const missing = ordered.filter((s) => !s.smcData).length;
+      if (missing > 0 && !this._warmRetryTimer) {
+        console.log(`[MarketDataService] ${missing} stocks still need candles — retry in 45s`);
+        this._warmRetryTimer = setTimeout(() => {
+          this._warmRetryTimer = null;
+          void this.warmRealCandles();
+        }, 45_000);
+      }
+    } finally {
+      this._warmingCandles = false;
     }
-    console.log('[MarketDataService] Real candle warm complete.');
-    // Catch-up freeze (if still missing) + upgrade dayOpen fallbacks to real 09:20 closes
-    openingMomentumService.ensureFrozen(this.stocks);
-    openingMomentumService.refineFreezeFromOpeningCandles(this.stocks);
   }
 
   /**

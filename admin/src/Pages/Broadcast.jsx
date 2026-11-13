@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Megaphone, Send, BellRing, Eye } from 'lucide-react';
+import { Megaphone, Send, Eye } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
+import { fieldBorderClass } from '../lib/formValidation';
 
 export default function Broadcast() {
-  const { systemSettings, saveAnnouncement } = useAdmin();
+  const { systemSettings, saveAnnouncement, showToast } = useAdmin();
 
   const [text, setText] = useState(
     systemSettings.announcement ||
@@ -13,15 +14,36 @@ export default function Broadcast() {
     systemSettings.announcementEnabled !== undefined ? systemSettings.announcementEnabled : true
   );
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const handleBroadcast = async (e) => {
     e.preventDefault();
+    const msg = String(text || '').trim();
+    if (!msg) {
+      setError('Announcement message is required.');
+      return;
+    }
+    if (msg.length > 280) {
+      setError('Message is too long (max 280 characters).');
+      return;
+    }
     setSaving(true);
-    await saveAnnouncement({
-      announcement: text,
-      announcementEnabled: enabled
-    });
-    setSaving(false);
+    setError('');
+    try {
+      await saveAnnouncement({
+        announcement: msg,
+        announcementEnabled: enabled
+      });
+    } catch (err) {
+      const fail =
+        err?.userMessage ||
+        err?.response?.data?.message ||
+        'Could not publish broadcast. Please try again.';
+      setError(fail);
+      showToast?.(fail);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -62,17 +84,26 @@ export default function Broadcast() {
         </div>
 
         {/* Configuration Form */}
-        <form onSubmit={handleBroadcast} className="space-y-4 text-xs pt-4 border-t border-slate-800">
+        <form onSubmit={handleBroadcast} className="space-y-4 text-xs pt-4 border-t border-slate-800" noValidate>
           <div>
             <label className="text-slate-400 block mb-1">Announcement Message Text</label>
             <input
               type="text"
               required
+              maxLength={280}
               placeholder="e.g. ⚡ Institutional block trade detected in HDFCBANK & RELIANCE..."
               value={text}
-              onChange={(e) => setText(e.target.value)}
-              className="w-full rounded-xl bg-slate-950 p-3 text-white border border-slate-800 focus:border-amber-400 focus:outline-none"
+              onChange={(e) => {
+                setText(e.target.value);
+                if (error) setError('');
+              }}
+              className={`w-full rounded-xl bg-slate-950 p-3 text-white border focus:outline-none ${fieldBorderClass(!!error)}`}
             />
+            {error ? (
+              <p className="mt-1.5 text-[11px] font-medium text-rose-400">{error}</p>
+            ) : (
+              <p className="mt-1 text-[10px] text-slate-500">{String(text || '').length}/280 characters</p>
+            )}
           </div>
 
           <div className="flex items-center space-x-3">

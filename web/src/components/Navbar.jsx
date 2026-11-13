@@ -5,15 +5,13 @@ import {
   Home,
   LayoutDashboard,
   Activity,
-  BookOpen,
-  Newspaper,
   Zap,
+  Crosshair,
   User,
   LogOut,
   Sparkles,
   Menu,
   X,
-  PenLine,
   Lock,
   Sun,
   Moon,
@@ -28,10 +26,9 @@ const NAV_ITEMS = [
   { id: 'terminal', label: 'Terminal', path: '/terminal', icon: LayoutDashboard, live: true, authRequired: true },
   { id: 'order-flow', label: 'Order Flow', path: '/order-flow', icon: GitBranch, live: true, authRequired: true },
   { id: 'momentum', label: '5M Momentum', path: '/momentum', icon: Zap, live: true, authRequired: true },
-  { id: 'xray', label: 'Market X-Ray', path: '/xray', icon: Activity, authRequired: true },
-  { id: 'news', label: 'Market News', path: '/news', icon: Newspaper },
-  { id: 'blog', label: 'SMC Blog', path: '/blog', icon: BookOpen },
-  { id: 'trade-log', label: 'Trade Log', path: '/trade-log', icon: PenLine, authRequired: true }
+  { id: 'alphamove', label: 'AlphaMove', path: '/alpha-move', icon: Crosshair, live: true, authRequired: true },
+  { id: 'alphamove2', label: 'AlphaMove 2', path: '/alpha-move-2', icon: Sparkles, authRequired: true },
+  { id: 'xray', label: 'Market X-Ray', path: '/xray', icon: Activity, authRequired: true }
 ];
 
 function formatChange(change) {
@@ -78,10 +75,9 @@ export default function Navbar({
     if (currentPath.startsWith('/terminal')) return 'terminal';
     if (currentPath.startsWith('/order-flow')) return 'order-flow';
     if (currentPath.startsWith('/momentum') || currentPath.startsWith('/opening-momentum')) return 'momentum';
+    if (currentPath.startsWith('/alpha-move-2')) return 'alphamove2';
+    if (currentPath.startsWith('/alpha-move') || currentPath.startsWith('/directional')) return 'alphamove';
     if (currentPath.startsWith('/xray') || currentPath.startsWith('/market-xray')) return 'xray';
-    if (currentPath.startsWith('/news')) return 'news';
-    if (currentPath.startsWith('/blog')) return 'blog';
-    if (currentPath.startsWith('/trade-log') || currentPath.startsWith('/journal')) return 'trade-log';
     if (currentPath.startsWith('/dashboard')) return 'dashboard';
     if (currentPath.startsWith('/pricing')) return 'pricing';
     return propActiveTab || 'home';
@@ -139,11 +135,13 @@ export default function Navbar({
         <aside className="absolute left-0 top-0 bottom-0 w-[min(100vw-3rem,20rem)] bg-[#0a0f1d] border-r border-slate-800 shadow-2xl flex flex-col">
           <div className="flex items-center justify-between gap-3 px-4 py-4 border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600">
-                <Zap className="h-5 w-5 text-black fill-black" />
-              </div>
-              <span className="font-extrabold text-white truncate">
-                ORDER<span className="text-cyan-400">BLOCK</span>
+              <img
+                src="/brand/tradrift-logo.svg"
+                alt="Tradrift"
+                className="h-9 w-9 shrink-0 rounded-xl shadow-md shadow-cyan-500/20"
+              />
+              <span className="font-extrabold text-white truncate tracking-tight">
+                Trad<span className="text-cyan-400">rift</span>
               </span>
             </div>
             <button
@@ -287,16 +285,15 @@ export default function Navbar({
               onClick={() => handleTabClick('home', '/')}
               className="flex items-center gap-2 cursor-pointer group min-w-0"
             >
-              <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 via-cyan-400 to-blue-600 shadow-md shadow-cyan-500/20">
-                <Zap className="h-4 w-4 sm:h-5 sm:w-5 text-black fill-black" />
-              </div>
+              <img
+                src="/brand/tradrift-logo.svg"
+                alt="Tradrift"
+                className="h-8 w-8 sm:h-9 sm:w-9 shrink-0 rounded-xl shadow-md shadow-cyan-500/20"
+              />
               <div className="flex flex-col text-left min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm sm:text-base font-extrabold tracking-tight text-white truncate">
-                    ORDER<span className="text-cyan-400">BLOCK</span>
-                  </span>
-                  <span className="hidden sm:inline rounded bg-cyan-950/90 px-1.5 py-0.5 text-[9px] font-bold text-cyan-400 border border-cyan-800/60 uppercase">
-                    PRO
+                    Trad<span className="text-cyan-400">rift</span>
                   </span>
                 </div>
                 <span className="hidden md:block text-[10px] text-slate-500 font-medium -mt-0.5">
@@ -318,7 +315,7 @@ export default function Navbar({
                 <Icon className="h-3.5 w-3.5" />
                 <span className="hidden xl:inline">{label}</span>
                 <span className="xl:hidden">
-                  {id === 'xray' ? 'X-Ray' : id === 'news' ? 'News' : id === 'blog' ? 'Blog' : label}
+                  {id === 'xray' ? 'X-Ray' : label}
                 </span>
                 {authRequired && !user && <Lock className="h-3 w-3 opacity-70" />}
                 {live && (

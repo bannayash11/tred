@@ -60,16 +60,52 @@ const userSchema = new mongoose.Schema({
     status: {
       type: String,
       enum: ['active', 'expired', 'trial'],
-      default: 'trial'
+      // Default OFF — no free trial unless admin enables + register applies it
+      default: 'expired'
     },
     plan: {
       type: String,
-      default: '14-Day Free Trial'
+      default: 'No Active Plan'
+    },
+    planId: {
+      type: String,
+      default: null
+    },
+    /** server = shared Tradrift feed | byok = user broker keys | trial */
+    mode: {
+      type: String,
+      enum: ['server', 'byok', 'trial'],
+      default: 'server'
+    },
+    /**
+     * Grandfather flag: if admin turns BYOK sales OFF, users who already
+     * purchased BYOK keep access while this stays true.
+     */
+    byokGranted: {
+      type: Boolean,
+      default: false
     },
     expiresAt: {
       type: Date,
-      default: () => new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) // 14 days trial
+      default: () => new Date(Date.now() - 60_000)
     }
+  },
+  /** Encrypted BYOK broker bundle — secrets never leave the server plaintext */
+  byok: {
+    provider: { type: String, default: null },
+    status: {
+      type: String,
+      enum: ['none', 'pending', 'connected', 'error'],
+      default: 'none'
+    },
+    connectedAt: { type: Date, default: null },
+    lastValidatedAt: { type: Date, default: null },
+    uccMasked: { type: String, default: null },
+    mobileMasked: { type: String, default: null },
+    consumerKeyMasked: { type: String, default: null },
+    secretsCipher: { type: String, default: null, select: false },
+    sessionCipher: { type: String, default: null, select: false },
+    lastError: { type: String, default: null }
   },
   createdAt: {
     type: Date,

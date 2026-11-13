@@ -2,9 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard,
   Activity,
-  BookOpen,
   ShieldCheck,
-  Zap,
   TrendingUp,
   User,
   LogOut,
@@ -30,16 +28,15 @@ export default function Navbar({
             onClick={() => setActiveTab('terminal')}
             className="flex items-center space-x-2.5 cursor-pointer group"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
-              <Zap className="h-5 w-5 text-black fill-black" />
-            </div>
+            <img
+              src="/brand/tradrift-logo.svg"
+              alt="Tradrift"
+              className="h-9 w-9 rounded-lg shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform"
+            />
             <div>
               <div className="flex items-center space-x-1.5">
                 <span className="text-lg font-extrabold tracking-tight text-white group-hover:text-cyan-400 transition-colors">
-                  ORDER<span className="text-cyan-400">BLOCK</span>
-                </span>
-                <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-[10px] font-bold text-cyan-400 border border-cyan-800/60">
-                  PRO
+                  Trad<span className="text-cyan-400">rift</span>
                 </span>
               </div>
               <p className="text-[10px] font-medium text-slate-400 -mt-0.5">SMC & Liquidity Terminal</p>
@@ -102,18 +99,6 @@ export default function Navbar({
           >
             <Activity className="h-4 w-4" />
             <span>Market X-Ray</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('journal')}
-            className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
-              activeTab === 'journal'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-semibold shadow'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <BookOpen className="h-4 w-4" />
-            <span>Journal</span>
           </button>
 
           <button

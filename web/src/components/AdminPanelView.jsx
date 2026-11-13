@@ -63,7 +63,7 @@ export default function AdminPanelView() {
       setTimeout(() => setNotice(''), 3000);
       loadAdmin();
     } catch (err) {
-      alert('Error updating user: ' + err.message);
+      alert(err.userMessage || err.response?.data?.message || 'Could not update user. Please try again.');
     }
   };
 
@@ -81,7 +81,7 @@ export default function AdminPanelView() {
       setNotice('Broker API settings saved successfully!');
       setTimeout(() => setNotice(''), 3000);
     } catch (err) {
-      alert('Error saving broker: ' + err.message);
+      alert(err.userMessage || err.response?.data?.message || 'Could not save broker settings. Please try again.');
     }
   };
 
@@ -95,7 +95,7 @@ export default function AdminPanelView() {
       setNotice('Announcement broadcasted to terminal!');
       setTimeout(() => setNotice(''), 3000);
     } catch (err) {
-      alert('Error saving announcement: ' + err.message);
+      alert(err.userMessage || err.response?.data?.message || 'Could not save announcement. Please try again.');
     }
   };
 

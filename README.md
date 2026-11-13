@@ -1,4 +1,4 @@
-# OrderBlock Pro — MERN Multi-Page Institutional Trading Platform
+# Tradrift — MERN Multi-Page Institutional Trading Platform
 
 A complete, production-grade **MERN stack (MongoDB, Express, React, Node.js)** platform with full multi-page capabilities, tier-based feature access, and a bulletproof, secure Admin Gateway.
 
@@ -44,12 +44,12 @@ tred/
 ## 🔑 Demo Credentials
 
 ### 1. Super Admin Portal (`http://localhost:3004`)
-* **Email:** `admin@orderblock.local`
+* **Email:** `admin@tradrift.local`
 * **Password:** `admin123`
-* **Sub-Admin:** `subadmin@orderblock.local` / `subadmin123`
+* **Sub-Admin:** `subadmin@tradrift.local` / `subadmin123`
 * Forgot-password issues a **one-time random 6-digit code** (shown in response for local demo only).
 
 ### 2. Trader Web App (`http://localhost:3003`)
-* **Email:** `trader@orderblock.local`
+* **Email:** `trader@tradrift.local`
 * **Password:** `password123`
 * `/journal` and `/dashboard` require login. API routes reject missing/invalid JWTs (no anonymous admin fallback).

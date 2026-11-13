@@ -2,12 +2,9 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import {
-  ShieldCheck,
   Users,
   Megaphone,
   KeyRound,
-  BookOpen,
-  Newspaper,
   Sliders,
   LogOut,
   ExternalLink,
@@ -15,12 +12,13 @@ import {
   Globe,
   FileText,
   Zap,
+  CreditCard,
   X
 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 
 function SidebarPanel({ onClose, showClose }) {
-  const { adminUser, usersList, plansList, newsList, blogsList, seoPages, cmsPages, showToast, requestLogout } = useAdmin();
+  const { adminUser, usersList, plansList, seoPages, cmsPages, showToast, requestLogout } = useAdmin();
   const isSubAdmin = adminUser?.role === 'subadmin';
 
   const linkClass = ({ isActive }) =>
@@ -39,12 +37,14 @@ function SidebarPanel({ onClose, showClose }) {
       <div className="min-h-0 flex-1 flex flex-col">
         <div className="flex items-center justify-between gap-2 p-4 sm:p-5 border-b border-slate-800/80">
           <div className="flex items-center space-x-3 min-w-0">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-amber-500 to-orange-600 shadow-md shadow-amber-500/20 shrink-0">
-              <ShieldCheck className="h-6 w-6 text-black" />
-            </div>
+            <img
+              src="/brand/tradrift-logo.svg"
+              alt="Tradrift"
+              className="h-10 w-10 rounded-xl shadow-md shadow-amber-500/20 shrink-0"
+            />
             <div className="min-w-0">
               <div className="text-base font-extrabold tracking-tight text-white truncate">
-                ORDER<span className="text-amber-400">BLOCK</span>
+                Trad<span className="text-amber-400">rift</span>
               </div>
               <span
                 className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border ${
@@ -88,24 +88,16 @@ function SidebarPanel({ onClose, showClose }) {
               </div>
               <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{plansList.length}</span>
             </NavLink>
+            <NavLink to="/payments" onClick={handleNav} className={linkClass}>
+              <div className="flex items-center space-x-2.5">
+                <CreditCard className="h-4 w-4" />
+                <span>Payments</span>
+              </div>
+            </NavLink>
           </div>
 
           <div className="space-y-1">
-            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Content</div>
-            <NavLink to="/news" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
-                <Newspaper className="h-4 w-4" />
-                <span>News Wire</span>
-              </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{newsList.length}</span>
-            </NavLink>
-            <NavLink to="/blogs" onClick={handleNav} className={linkClass}>
-              <div className="flex items-center space-x-2.5">
-                <BookOpen className="h-4 w-4" />
-                <span>SMC Blogs</span>
-              </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{blogsList.length}</span>
-            </NavLink>
+            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Site</div>
             <NavLink to="/seo" onClick={handleNav} className={linkClass}>
               <div className="flex items-center space-x-2.5">
                 <Globe className="h-4 w-4" />

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { fetchSeoByPath, fetchBlogs } from '../services/api';
+import { fetchSeoByPath } from '../services/api';
 
 const SITE_ORIGIN =
-  typeof window !== 'undefined' ? window.location.origin : 'https://orderblock.local';
+  typeof window !== 'undefined' ? window.location.origin : 'https://tradrift.local';
 
-const DEFAULT_TITLE = 'OrderBlock X — Institutional SMC & Liquidity Terminal';
+const DEFAULT_TITLE = 'Tradrift — Institutional SMC & Liquidity Terminal';
 
 function upsertMeta(attr, key, content) {
   if (content === undefined || content === null) return;
@@ -36,7 +36,6 @@ function upsertJsonLd(jsonText) {
   if (!jsonText || !String(jsonText).trim()) return;
 
   try {
-    // Validate JSON before injecting
     JSON.parse(jsonText);
   } catch {
     return;
@@ -65,7 +64,7 @@ function absoluteUrl(pathOrUrl) {
 
 /**
  * Applies admin-managed SEO meta tags for the current route.
- * Optional overrides: { title, excerpt, id } for dynamic pages like blog detail.
+ * Optional overrides: { title, excerpt, id } for dynamic pages.
  */
 export default function SeoHead({ overrides = null }) {
   const location = useLocation();
@@ -77,7 +76,7 @@ export default function SeoHead({ overrides = null }) {
     const path = location.pathname || '/';
 
     fetchSeoByPath(path)
-      .then(async (res) => {
+      .then((res) => {
         if (cancelled || !res?.success || !res.seo) return;
 
         let vars = {
@@ -85,31 +84,6 @@ export default function SeoHead({ overrides = null }) {
           title: overrides?.title || '',
           excerpt: overrides?.excerpt || ''
         };
-
-        // Auto-fill blog article placeholders when on /blog/:id
-        if (
-          (res.seo.pageKey === 'blog-detail' || path.startsWith('/blog/')) &&
-          params.id &&
-          (!vars.title || !vars.excerpt)
-        ) {
-          try {
-            const blogsRes = await fetchBlogs();
-            if (blogsRes?.success && blogsRes.blogs) {
-              const blog = blogsRes.blogs.find(
-                (b) => b.id === params.id || b.id === `blog_${params.id}`
-              );
-              if (blog) {
-                vars = {
-                  id: params.id,
-                  title: overrides?.title || blog.title || '',
-                  excerpt: overrides?.excerpt || blog.excerpt || ''
-                };
-              }
-            }
-          } catch {
-            // keep empty placeholders
-          }
-        }
 
         if (overrides) {
           vars = { ...vars, ...overrides };

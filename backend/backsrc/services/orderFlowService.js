@@ -1050,6 +1050,50 @@ class OrderFlowService {
     return fs.readFileSync(file, 'utf8');
   }
 
+  getFuturesBundle(session) {
+    const current = getLatestTradingSessionDate(new Date());
+    const sess = session || this.getStatus().session || current;
+    const now = Date.now();
+
+    if (this._bundleCache && this._bundleCache.session === sess && now - this._bundleCache.at < 15000) {
+      return this._bundleCache.payload;
+    }
+
+    const dir = path.join(DATA_DIR, 'futures', sess);
+    const items = {};
+
+    if (fs.existsSync(dir)) {
+      try {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue;
+          const sym = path.basename(file, '.json').toUpperCase();
+          try {
+            const raw = fs.readFileSync(path.join(dir, file), 'utf8');
+            const parsed = JSON.parse(raw);
+            if (parsed?.months?.length) {
+              items[sym] = { months: parsed.months };
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
+    const payload = {
+      session: sess,
+      count: Object.keys(items).length,
+      items
+    };
+
+    this._bundleCache = {
+      session: sess,
+      at: now,
+      payload
+    };
+
+    return payload;
+  }
+
   async getFutures(symbol, session, { nearOnly = true, force = false } = {}) {
     const u = this.bySymbol.get(symbol);
     if (!u) {

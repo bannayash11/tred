@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { X, TrendingUp, TrendingDown, Target, BookOpen, Layers, Check, ArrowLeft } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, Target, Layers, ArrowLeft } from 'lucide-react';
 import { fetchStock, getSocket } from '../services/api';
 import { getMembership } from '../lib/membership';
 import TradingViewChart from './TradingViewChart';
@@ -71,7 +71,7 @@ function checkIsMarketOpen() {
 }
 
 /** Stock chart + SMC anatomy. Use asPage for full-page layout instead of modal. */
-export default function ChartModal({ symbol, onClose, onLogTrade, asPage = false }) {
+export default function ChartModal({ symbol, onClose, asPage = false }) {
   const authUser = useSelector((state) => state.auth.user);
   const plans = useSelector((state) => state.content?.plans || []);
   const membership = getMembership(authUser, plans);
@@ -110,7 +110,6 @@ export default function ChartModal({ symbol, onClose, onLogTrade, asPage = false
   const [stockData, setStockData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
-  const [loggedNotice, setLoggedNotice] = useState(false);
   const [livePrice, setLivePrice] = useState(null);
   const [liveChange, setLiveChange] = useState(null);
   const [priceFlash, setPriceFlash] = useState(null); // 'up' | 'down' | null
@@ -160,7 +159,9 @@ export default function ChartModal({ symbol, onClose, onLogTrade, asPage = false
       })
       .catch((err) => {
         console.error('Error fetching stock details:', err);
-        if (isMounted) setFetchError(err.response?.data?.message || 'Failed to load live chart.');
+        if (isMounted) {
+          setFetchError(err.userMessage || err.response?.data?.message || 'Failed to load live chart.');
+        }
       })
       .finally(() => {
         if (isMounted) setLoading(false);
@@ -241,32 +242,6 @@ export default function ChartModal({ symbol, onClose, onLogTrade, asPage = false
     };
   }, [symbol, timeframe, chartMode]);
 
-
-  const handleQuickJournal = () => {
-    if (!stockData) return;
-    const effectivePrice = livePrice ?? stockData.currentPrice;
-    const isBullish = Boolean(stockData.smcData?.activeBullishOB);
-    const ob = isBullish ? stockData.smcData.activeBullishOB : stockData.smcData.activeBearishOB;
-    const entry = {
-      symbol: stockData.symbol,
-      direction: isBullish ? 'BUY' : 'SELL',
-      setupType: 'ORDER_BLOCK',
-      timeframe,
-      entryPrice: effectivePrice,
-      stopLoss: ob ? (isBullish ? ob.bottom : ob.top) : effectivePrice * 0.99,
-      targetPrice: isBullish
-        ? stockData.smcData?.liquidity?.buySide?.price || effectivePrice * 1.02
-        : stockData.smcData?.liquidity?.sellSide?.price || effectivePrice * 0.98,
-      quantity: 50,
-      notes: `Manual journal · ${isBullish ? 'Bullish' : 'Bearish'} order block structure · score ${ob?.score || 80}/100`
-    };
-
-    if (onLogTrade) {
-      onLogTrade(entry);
-      setLoggedNotice(true);
-      setTimeout(() => setLoggedNotice(false), 2500);
-    }
-  };
 
   const currentDisplayPrice = livePrice ?? stockData?.currentPrice;
   const currentDisplayChange = liveChange ?? stockData?.change;
@@ -371,24 +346,6 @@ export default function ChartModal({ symbol, onClose, onLogTrade, asPage = false
                 </span>
               </div>
             )}
-            <button
-              type="button"
-              onClick={handleQuickJournal}
-              className="flex items-center gap-1.5 rounded-lg bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/25 transition-colors"
-            >
-              {loggedNotice ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Saved</span>
-                </>
-              ) : (
-                <>
-                  <BookOpen className="h-3.5 w-3.5" />
-                  <span>Log trade</span>
-                </>
-              )}
-            </button>
-
             {!asPage && (
               <button
                 type="button"

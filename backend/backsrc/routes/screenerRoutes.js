@@ -1,7 +1,10 @@
 import express from 'express';
+import { authMiddleware, requireActiveSubscription } from '../middleware/authMiddleware.js';
 import { marketDataService } from '../services/marketDataService.js';
 
 const router = express.Router();
+
+router.use(authMiddleware, requireActiveSubscription);
 
 // Get live ranked Order Block screener setups
 router.get('/live', (req, res) => {

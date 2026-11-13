@@ -87,6 +87,24 @@ export async function fetchMarketMinute(date: string, minute: string): Promise<C
   return res.ok ? parseMarketFile(await res.json()) : null;
 }
 
+export interface FuturesBundleResponse {
+  session: string;
+  count: number;
+  items: Record<string, { months: FuturesMonth[] }>;
+}
+
+export async function fetchFuturesBundle(session: string): Promise<FuturesBundleResponse | null> {
+  try {
+    const res = await ofFetch(`/futures-bundle?session=${session}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as FuturesBundleResponse;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchFutures(symbol: string, session: string): Promise<FuturesSeries | null> {
   const res = await ofFetch(`/futures/${encodeURIComponent(symbol)}?session=${session}`, {
     cache: 'no-store',
@@ -130,17 +148,25 @@ export function useMarketFeed() {
       if (!visible()) return;
       if (!market || moving(statusRef.current)) setTick((value) => value + 1);
     }, market ? 60_000 : 2_000);
-    return () => window.clearInterval(timer);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setTick((value) => value + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [market]);
 
   return { market, loading: !market, error, status, rescan: () => setTick((value) => value + 1) };
 }
 
 /** Keep live concurrency low — Kotak 429s when board + build + quotes compete. */
-const WORKERS_LIVE = 3;
+/** Keep live concurrency sensible so requests finish smoothly. */
+const WORKERS_LIVE = 4;
 const WORKERS_AFTER = 2;
 
-/** Each underlying's futures: read six at a time, and again every minute or two while the numbers move. (same as order-flow-main) */
+/** Each underlying's futures: fill missing ones automatically; never wipe a good chart with an empty reply. */
 export function useFuturesFeed(symbols: readonly string[], enabled: boolean, status: FeedStatus | null) {
   const [series, setSeries] = useState<ReadonlyMap<string, FuturesSeries | null>>(new Map());
   const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
@@ -149,7 +175,9 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
   const session = status?.session ?? getLatestTradingSessionDate(new Date());
   const key = symbols.join(',');
   const statusRef = useRef(status);
+  const seriesRef = useRef(series);
   statusRef.current = status;
+  seriesRef.current = series;
 
   const loaded = useMemo(() => {
     let n = 0;
@@ -160,16 +188,14 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
   useEffect(() => {
     if (!enabled) return undefined;
     const incomplete = loaded < symbols.length;
-    // Retry empty futures quickly while the board is still filling; ease off once warm.
+    // Auto-retry missing futures; ease off once the board is warm — avoid aggressive cancellation storms.
     const every = incomplete
-      ? 8_000
+      ? 20_000
       : statusRef.current?.provider.alwaysLive
         ? 60_000
         : 90_000;
     const timer = window.setInterval(() => {
       if (!visible()) return;
-      // Keep catch-up after market close until every underlying has futures
-      // (today's session candles are still available; otherwise the board stays sparse).
       if (moving(statusRef.current) || loaded < symbols.length) setTick((value) => value + 1);
     }, every);
     return () => window.clearInterval(timer);
@@ -178,32 +204,91 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
   useEffect(() => {
     if (!enabled || !symbols.length) return undefined;
     let cancelled = false;
-    let cursor = 0;
-    if (tick === 0) setDone(0);
-    const read = async (symbol: string) => {
-      let result: FuturesSeries | null = null;
-      let ok = true;
-      try {
-        result = await fetchFutures(symbol, session);
-      } catch {
-        ok = false;
+    const firstPass = tick === 0;
+
+    const execute = async () => {
+      // 1. Instant Bundle Hydration: Load all available futures in a single HTTP call
+      if (firstPass) {
+        setDone(0);
+        try {
+          const bundle = await fetchFuturesBundle(session);
+          if (bundle?.items && !cancelled) {
+            const next = new Map(seriesRef.current);
+            let hydrated = 0;
+            for (const sym of symbols) {
+              const item = bundle.items[sym];
+              if (item?.months?.length) {
+                const s = combineMonths(sym, item.months);
+                if (s?.candles?.length) {
+                  next.set(sym, s);
+                  hydrated += 1;
+                }
+              }
+            }
+            if (hydrated > 0 && !cancelled) {
+              seriesRef.current = next;
+              setSeries(next);
+              setDone(hydrated);
+            }
+          }
+        } catch {
+          // Fall back gracefully to per-symbol requests
+        }
       }
+
       if (cancelled) return;
-      if (ok || tick === 0) setSeries((current) => new Map(current).set(symbol, result));
-      setFailed((current) => {
-        if (ok ? !current.has(symbol) : current.has(symbol)) return current;
-        const next = new Set(current);
-        if (ok) next.delete(symbol);
-        else next.add(symbol);
-        return next;
+
+      // 2. Queue only symbols that still have missing candles
+      const queue = symbols.filter((symbol) => {
+        const have = seriesRef.current.get(symbol);
+        return !have || !have.candles?.length;
       });
-      if (tick === 0) setDone((value) => value + 1);
+
+      if (!queue.length) return;
+
+      let cursor = 0;
+      const read = async (symbol: string) => {
+        let result: FuturesSeries | null = null;
+        let ok = true;
+        try {
+          result = await fetchFutures(symbol, session);
+        } catch {
+          ok = false;
+        }
+        if (cancelled) return;
+        const hasCandles = Boolean(result?.candles?.length);
+        setSeries((current) => {
+          const prev = current.get(symbol);
+          if (!hasCandles && prev?.candles?.length) return current;
+          if (!ok && prev?.candles?.length) return current;
+          if (ok || firstPass) {
+            const next = new Map(current);
+            next.set(symbol, hasCandles ? result : prev ?? null);
+            seriesRef.current = next;
+            return next;
+          }
+          return current;
+        });
+        setFailed((current) => {
+          const isFail = !ok || !hasCandles;
+          if (isFail ? current.has(symbol) : !current.has(symbol)) return current;
+          const next = new Set(current);
+          if (isFail) next.add(symbol);
+          else next.delete(symbol);
+          return next;
+        });
+        if (firstPass) setDone((value) => value + 1);
+      };
+
+      const worker = async () => {
+        while (cursor < queue.length && !cancelled) await read(queue[cursor++]);
+      };
+      const workers = moving(statusRef.current) ? WORKERS_LIVE : WORKERS_AFTER;
+      await Promise.all(Array.from({ length: Math.min(workers, queue.length) }, worker));
     };
-    const worker = async () => {
-      while (cursor < symbols.length && !cancelled) await read(symbols[cursor++]);
-    };
-    const workers = moving(statusRef.current) ? WORKERS_LIVE : WORKERS_AFTER;
-    void Promise.all(Array.from({ length: Math.min(workers, symbols.length) }, worker));
+
+    void execute();
+
     return () => {
       cancelled = true;
     };
@@ -212,7 +297,7 @@ export function useFuturesFeed(symbols: readonly string[], enabled: boolean, sta
   return {
     series,
     failed,
-    read: tick === 0 ? Math.min(done, symbols.length) : symbols.length,
+    read: Math.min(Math.max(done, loaded), symbols.length),
     total: symbols.length,
     session,
   };

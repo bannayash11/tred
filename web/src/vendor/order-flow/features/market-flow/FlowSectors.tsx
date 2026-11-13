@@ -88,7 +88,7 @@ const SPREAD_H = 46;
  * gather everything past them), toned by the
  * side each bin falls on, with the up / flat / down split under it.
  */
-function FlowSpread({ flow }: { flow: MarketFlow }) {
+export function FlowSpread({ flow }: { flow: MarketFlow }) {
   const reach = SPREAD_REACH[flow.window];
   const bins = Array.from({ length: 20 }, () => 0);
   const step = (reach * 2) / bins.length;

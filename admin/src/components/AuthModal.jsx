@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, User, Lock, Mail, ShieldCheck, ArrowRight } from 'lucide-react';
+import { X, User, Lock, Mail, ArrowRight } from 'lucide-react';
 import { loginApi, registerApi } from '../services/api';
 
 export default function AuthModal({ onClose, onLoginSuccess }) {
@@ -9,31 +9,70 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const clearErrors = () => {
+    setError('');
+    setFieldErrors({});
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    clearErrors();
+
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const next = {};
+    if (isRegister && !String(name || '').trim()) next.name = 'Full name is required.';
+    if (!normalizedEmail) next.email = 'Email is required.';
+    if (!password || password.length < 6) next.password = 'Password must be at least 6 characters.';
+    if (Object.keys(next).length) {
+      setFieldErrors(next);
+      setError(Object.values(next)[0]);
+      setLoading(false);
+      return;
+    }
 
     try {
-      let res;
-      if (isRegister) {
-        res = await registerApi({ name, email, password });
-      } else {
-        res = await loginApi({ email, password });
-      }
+      const res = isRegister
+        ? await registerApi({ name: String(name).trim(), email: normalizedEmail, password })
+        : await loginApi({ email: normalizedEmail, password });
 
       if (res.success) {
         localStorage.setItem('tred_auth_token', res.token);
         if (onLoginSuccess) onLoginSuccess(res.user);
         onClose();
+      } else {
+        const msg =
+          res.message ||
+          (isRegister
+            ? 'Could not create account. Please check your details.'
+            : 'Invalid email or password. Please check your details.');
+        setError(msg);
+        setFieldErrors(
+          /email already|registered/i.test(msg) ? { email: msg } : { password: msg }
+        );
       }
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Authentication failed');
+      const msg =
+        err.userMessage ||
+        err.response?.data?.message ||
+        (isRegister
+          ? 'Could not create account. Please check your details.'
+          : 'Invalid email or password. Please check your details.');
+      setError(msg);
+      setFieldErrors(
+        /email already|registered/i.test(msg) ? { email: msg } : { password: msg }
+      );
     } finally {
       setLoading(false);
     }
   };
+
+  const border = (field) =>
+    fieldErrors[field]
+      ? 'border-rose-600 focus:border-rose-500'
+      : 'border-slate-800 focus:border-cyan-500';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
@@ -47,20 +86,14 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
 
         <div className="text-center space-y-1 mb-6">
           <h2 className="text-xl font-extrabold text-white">
-            {isRegister ? 'Create Trader Account' : 'Welcome to OrderBlock Terminal'}
+            {isRegister ? 'Create Trader Account' : 'Welcome to Tradrift Terminal'}
           </h2>
           <p className="text-xs text-slate-400">
-            {isRegister ? 'Start your 14-day institutional trial' : 'Sign in to access your saved setups & journal'}
+            {isRegister ? 'Start your 14-day institutional trial' : 'Sign in to access your saved setups & terminal'}
           </p>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-xl bg-rose-950/80 border border-rose-800/50 p-2.5 text-xs text-rose-300">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
+        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs" noValidate>
           {isRegister && (
             <div>
               <label className="text-slate-400 block mb-1">Full Name</label>
@@ -71,10 +104,16 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
                   required
                   placeholder="e.g. Rahul Sharma"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (fieldErrors.name) clearErrors();
+                  }}
+                  className={`w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border focus:outline-none ${border('name')}`}
                 />
               </div>
+              {fieldErrors.name && (
+                <p className="mt-1.5 text-[11px] font-medium text-rose-400">{fieldErrors.name}</p>
+              )}
             </div>
           )}
 
@@ -85,12 +124,23 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
               <input
                 type="email"
                 required
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="trader@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setEmail(e.target.value.toLowerCase());
+                  if (fieldErrors.email || fieldErrors.password) clearErrors();
+                }}
+                className={`w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border focus:outline-none ${border('email')}`}
               />
             </div>
+            {fieldErrors.email ? (
+              <p className="mt-1.5 text-[11px] font-medium text-rose-400">{fieldErrors.email}</p>
+            ) : (
+              <p className="mt-1 text-[10px] text-slate-500">Email is not case-sensitive (Y and y are the same).</p>
+            )}
           </div>
 
           <div>
@@ -102,10 +152,16 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
                 required
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border border-slate-800 focus:border-cyan-500 focus:outline-none"
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (fieldErrors.password) clearErrors();
+                }}
+                className={`w-full rounded-xl bg-slate-950 py-2.5 pl-9 pr-3 text-white border focus:outline-none ${border('password')}`}
               />
             </div>
+            {fieldErrors.password && (
+              <p className="mt-1.5 text-[11px] font-medium text-rose-400">{fieldErrors.password}</p>
+            )}
           </div>
 
           <button
@@ -124,7 +180,7 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
             type="button"
             onClick={() => {
               setIsRegister(!isRegister);
-              setError('');
+              clearErrors();
             }}
             className="font-bold text-cyan-400 hover:underline ml-1"
           >

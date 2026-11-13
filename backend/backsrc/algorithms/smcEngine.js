@@ -33,7 +33,7 @@ export class SMCEngine {
     const { swingHighs, swingLows } = this.findSwings(candles);
 
     // 2. Identify Order Blocks
-    const orderBlocks = this.findOrderBlocks(candles, swingHighs, swingLows);
+    const orderBlocks = this.findTradrifts(candles, swingHighs, swingLows);
 
     // 3. Identify Fair Value Gaps (FVG)
     const fvgs = this.findFVGs(candles);
@@ -59,7 +59,7 @@ export class SMCEngine {
       currentPrice,
       activeBullishOB,
       activeBearishOB,
-      allOrderBlocks: orderBlocks.slice(-8), // Keep recent
+      allTradrifts: orderBlocks.slice(-8), // Keep recent
       fvgs: fvgs.slice(-4),
       liquidity,
       recentBOS,
@@ -115,7 +115,7 @@ export class SMCEngine {
    * Bullish OB: Last down candle (red) before a violent breakout upwards that breaks swing structure.
    * Bearish OB: Last up candle (green) before a violent drop downwards that breaks swing structure.
    */
-  findOrderBlocks(candles, swingHighs, swingLows) {
+  findTradrifts(candles, swingHighs, swingLows) {
     const orderBlocks = [];
     const len = candles.length;
 

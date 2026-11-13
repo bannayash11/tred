@@ -26,40 +26,64 @@ export default function Terminal(props) {
     props.xrayData || context.xrayData || reduxScreener?.marketXRay || null
   );
   const [terminalTab, setTerminalTab] = useState('SCREENER'); // 'SCREENER' | 'MOMENTUM'
+  const [feedError, setFeedError] = useState('');
 
   useEffect(() => {
     if (context.screenerData) {
       setLocalScreener(context.screenerData);
-    } else {
-      fetchScreener()
-        .then((res) => {
-          if (res.success && res.data) {
-            setLocalScreener(res.data);
-            dispatch(
-              setScreenerData({
-                all: res.data.allStocks,
-                bullish: res.data.bullishSetups,
-                bearish: res.data.bearishSetups
-              })
-            );
-          }
-        })
-        .catch((err) => console.error('Error fetching screener in Terminal:', err));
     }
+  }, [context.screenerData]);
 
+  useEffect(() => {
     if (context.xrayData) {
       setLocalXRay(context.xrayData);
-    } else {
+    }
+  }, [context.xrayData]);
+
+  // Poll screener while setups are still warming — no manual refresh needed.
+  useEffect(() => {
+    let cancelled = false;
+    const pull = () => {
+      fetchScreener()
+        .then((res) => {
+          if (cancelled || !res.success || !res.data) return;
+          setLocalScreener(res.data);
+          setFeedError('');
+          dispatch(
+            setScreenerData({
+              all: res.data.allStocks,
+              bullish: res.data.bullishSetups,
+              bearish: res.data.bearishSetups
+            })
+          );
+        })
+        .catch((err) => {
+          console.error('Error fetching screener in Terminal:', err);
+          if (!cancelled) {
+            setFeedError(err.userMessage || 'Could not refresh screener feed.');
+          }
+        });
+
       fetchMarketXRay()
         .then((res) => {
-          if (res.success && res.data) {
-            setLocalXRay(res.data);
-            dispatch(setMarketXRay(res.data));
-          }
+          if (cancelled || !res.success || !res.data) return;
+          setLocalXRay(res.data);
+          dispatch(setMarketXRay(res.data));
         })
-        .catch((err) => console.error('Error fetching xray in Terminal:', err));
-    }
-  }, [context.screenerData, context.xrayData, dispatch]);
+        .catch((err) => {
+          console.error('Error fetching xray in Terminal:', err);
+        });
+    };
+    pull();
+    const bullish = localScreener?.bullishSetups?.length || 0;
+    const bearish = localScreener?.bearishSetups?.length || 0;
+    const empty = bullish + bearish === 0;
+    const timer = window.setInterval(pull, empty ? 8_000 : 45_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [dispatch, localScreener?.bullishSetups?.length, localScreener?.bearishSetups?.length]);
 
   const onSelectStock = props.onSelectStock || context.onSelectStock;
   const liveUpdatedSymbols = props.liveUpdatedSymbols || context.liveUpdatedSymbols;
@@ -100,6 +124,12 @@ export default function Terminal(props) {
       </div>
 
       <MembershipBanner user={user} onOpenPricing={onOpenPricing} />
+
+      {feedError && (
+        <div className="rounded-xl border border-rose-800/70 bg-rose-950/40 px-3 py-2 text-xs text-rose-300">
+          {feedError}
+        </div>
+      )}
 
       <MarketXRayBar xrayData={localXRay} />
 
