@@ -111,10 +111,11 @@ export default function UtrCheckout({
           res.message ||
             (didActivate
               ? 'UTR received. Membership is now active.'
-              : 'UTR submitted. Membership will activate after admin verifies your payment.')
+              : 'UTR submitted. Please wait for payment confirmation — this can take up to 24 hours.')
         );
         onSuccess?.({
           payment: res.payment,
+          orderId: res.orderId || res.payment?.orderId || null,
           user: res.user || null,
           paymentVerified: !!res.paymentVerified || !!res.autoApproved,
           membershipActivated: !!res.membershipActivated,
@@ -161,16 +162,21 @@ export default function UtrCheckout({
   }
 
   if (status === 'success') {
+    // Pending UTR: parent shows the full wait screen. Instant activate: compact confirm.
+    if (!activatedOk) {
+      return (
+        <div className="flex items-center justify-center gap-2 py-6 text-xs font-semibold text-cyan-700 dark:text-cyan-300">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Opening confirmation…
+        </div>
+      );
+    }
     return (
       <div className="space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
         <div className="flex items-start gap-2 text-emerald-800 dark:text-emerald-200">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
           <div>
-            <p className="text-sm font-extrabold">
-              {activatedOk
-                ? 'Payment confirmed — membership active'
-                : 'UTR received — pending verification'}
-            </p>
+            <p className="text-sm font-extrabold">Payment confirmed — membership active</p>
             <p className="mt-1 text-xs leading-relaxed opacity-90">{message}</p>
           </div>
         </div>
@@ -276,7 +282,7 @@ export default function UtrCheckout({
       </button>
 
       <p className="text-center text-[10px] text-slate-500 dark:text-slate-400">
-        Not instant — admin verifies UTR, then membership activates.
+        After submit, wait for payment confirmation (up to 24 hours). Membership activates once verified.
       </p>
     </div>
   );

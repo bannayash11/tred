@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   BookOpen,
   Check,
+  Clock,
   CreditCard,
   ExternalLink,
   KeyRound,
@@ -22,6 +23,7 @@ import {
   Server,
   Zap,
   Smartphone,
+  LayoutDashboard,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { updateUser } from '../store/slices/authSlice';
@@ -103,6 +105,7 @@ export default function MembershipCheckout() {
   const [razorpayAvailable, setRazorpayAvailable] = useState(false);
   const [utrAvailable, setUtrAvailable] = useState(false);
   const [utrPendingDone, setUtrPendingDone] = useState(false);
+  const [utrPendingInfo, setUtrPendingInfo] = useState({ utr: '', orderId: '', amount: null });
   /** After BYOK payment: collect demat/broker API keys */
   const [awaitingByok, setAwaitingByok] = useState(() => mustConnectBroker);
   const [byokProvider, setByokProvider] = useState('upstox');
@@ -387,6 +390,127 @@ export default function MembershipCheckout() {
           <p className="text-sm text-emerald-800 dark:text-emerald-200/90">
             Your membership is now active. Launching trading terminal…
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── UTR submitted: wait for manual payment confirmation (up to 24h) ── */
+  if (utrPendingDone) {
+    const shownAmount =
+      utrPendingInfo.amount != null
+        ? Number(utrPendingInfo.amount)
+        : Number(plan?.price || 0);
+    return shell(
+      <div className="mx-auto max-w-lg animate-fadeIn">
+        <div className="overflow-hidden rounded-3xl border border-cyan-300/70 dark:border-cyan-500/35 bg-white/95 dark:bg-[#0c1322]/95 shadow-2xl backdrop-blur-xl">
+          <div className="relative border-b border-cyan-200/80 dark:border-cyan-500/20 bg-gradient-to-br from-cyan-50 via-white to-emerald-50/60 dark:from-cyan-950/50 dark:via-[#0c1322] dark:to-emerald-950/30 px-6 sm:px-8 pt-8 pb-7 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-400/40 bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 shadow-lg shadow-cyan-500/10">
+              <Clock className="h-8 w-8" />
+            </div>
+            <p className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Under review
+            </p>
+            <h2 className="mt-3 text-2xl sm:text-[1.7rem] font-black tracking-tight text-slate-900 dark:text-white">
+              Please wait for payment confirmation
+            </h2>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              We received your UTR. Our team will verify the payment and activate your membership
+              within <span className="font-bold text-slate-900 dark:text-white">24 hours</span>.
+            </p>
+          </div>
+
+          <div className="space-y-5 px-6 sm:px-8 py-6">
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-950/50 p-4 space-y-3">
+              {utrPendingInfo.utr ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">UTR</span>
+                  <code className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-bold font-mono text-cyan-700 dark:text-cyan-300 break-all">
+                    {utrPendingInfo.utr}
+                  </code>
+                </div>
+              ) : null}
+              {shownAmount > 0 ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Amount</span>
+                  <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
+                    ₹{shownAmount.toLocaleString('en-IN')}
+                  </span>
+                </div>
+              ) : null}
+              {plan?.name ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Plan</span>
+                  <span className="text-sm font-bold text-slate-800 dark:text-slate-100 text-right">
+                    {plan.name}
+                  </span>
+                </div>
+              ) : null}
+              {utrPendingInfo.orderId ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Order</span>
+                  <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-slate-400 break-all text-right">
+                    {utrPendingInfo.orderId}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <ol className="space-y-3">
+              {[
+                { done: true, title: 'UTR submitted', body: 'Your payment reference is saved.' },
+                {
+                  done: false,
+                  title: 'We confirm payment',
+                  body: 'Usually within 24 hours after bank/UPI check.'
+                },
+                {
+                  done: false,
+                  title: 'Membership activates',
+                  body: 'You can then open Terminal from your dashboard.'
+                }
+              ].map((step, i) => (
+                <li key={step.title} className="flex items-start gap-3">
+                  <span
+                    className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${
+                      step.done
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-500'
+                    }`}
+                  >
+                    {step.done ? <Check className="h-3.5 w-3.5 stroke-[3]" /> : i + 1}
+                  </span>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">{step.title}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{step.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+              Keep this UTR safe. You can close this page — we will activate membership after confirmation.
+              Check your dashboard later for status.
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard')}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-emerald-500/15 hover:brightness-105"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Go to dashboard
+              </button>
+              <Link
+                to="/pricing"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 dark:border-slate-600 bg-white/80 dark:bg-slate-900/60 px-4 py-3.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                Back to plans
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -864,11 +988,9 @@ export default function MembershipCheckout() {
                     Ready to pay ₹{finalPrice.toLocaleString('en-IN')}
                   </h4>
                   <p className="text-xs text-emerald-700 dark:text-emerald-300/80">
-                    {utrPendingDone
-                      ? 'UTR submitted — waiting for admin verification.'
-                      : isByok
-                        ? 'Choose how to pay — broker keys come after membership is active.'
-                        : 'Choose Razorpay (instant) or UPI UTR (manual verify).'}
+                    {isByok
+                      ? 'Choose how to pay — broker keys come after membership is active.'
+                      : 'Choose Razorpay (instant) or UPI UTR (manual verify).'}
                   </p>
                 </div>
                 <div className="text-right">
@@ -878,7 +1000,7 @@ export default function MembershipCheckout() {
                 </div>
               </div>
 
-              {!utrPendingDone && (razorpayAvailable || utrAvailable) && (
+              {(razorpayAvailable || utrAvailable) && (
                 <div className={`grid grid-cols-1 gap-2 ${razorpayAvailable && utrAvailable ? 'sm:grid-cols-2' : ''}`}>
                   {razorpayAvailable ? (
                     <button
@@ -917,35 +1039,27 @@ export default function MembershipCheckout() {
                 </div>
               )}
 
-              {!utrPendingDone && !razorpayAvailable && !utrAvailable ? (
+              {!razorpayAvailable && !utrAvailable ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-800 dark:text-amber-200">
                   No payment method is enabled right now. Please contact support or try again later.
                 </div>
               ) : null}
 
               <div className="pt-1">
-                {utrPendingDone ? (
-                  <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-900 dark:text-cyan-100 space-y-2">
-                    <p className="font-extrabold">Payment under review</p>
-                    <p className="text-xs leading-relaxed opacity-90">
-                      We received your UTR. Once admin confirms the amount in bank/UPI, your membership
-                      will activate automatically. You can close this page.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/dashboard')}
-                      className="mt-1 text-xs font-bold text-cyan-700 dark:text-cyan-300 hover:underline"
-                    >
-                      Go to dashboard →
-                    </button>
-                  </div>
-                ) : payMethod === 'utr' && utrAvailable ? (
+                {payMethod === 'utr' && utrAvailable ? (
                   <UtrCheckout
                     planId={plan.id}
                     amount={plan.price}
                     customerDetails={customerDetails}
                     buttonLabel={`Submit UTR · ₹${finalPrice.toLocaleString('en-IN')}`}
-                    onSuccess={({ user, membershipActivated, paymentVerified, autoApproved, pendingUtr }) => {
+                    onSuccess={({
+                      user,
+                      membershipActivated,
+                      paymentVerified,
+                      autoApproved,
+                      payment,
+                      orderId
+                    }) => {
                       if (user) dispatch(updateUser(user));
                       setFormError('');
                       if (autoApproved || membershipActivated || paymentVerified) {
@@ -959,8 +1073,12 @@ export default function MembershipCheckout() {
                         setTimeout(() => navigate('/terminal'), 1200);
                         return;
                       }
-                      if (pendingUtr) setUtrPendingDone(true);
-                      else setUtrPendingDone(true);
+                      setUtrPendingInfo({
+                        utr: payment?.utr || '',
+                        orderId: payment?.orderId || orderId || '',
+                        amount: payment?.amount ?? plan.price
+                      });
+                      setUtrPendingDone(true);
                     }}
                     onFailure={(err) => {
                       setFormError(
@@ -1016,10 +1134,7 @@ export default function MembershipCheckout() {
               <div className="flex items-center justify-between pt-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => {
-                    setReadyToPay(false);
-                    setUtrPendingDone(false);
-                  }}
+                  onClick={() => setReadyToPay(false)}
                   className="font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition"
                 >
                   ← Edit personal details

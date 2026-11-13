@@ -413,17 +413,23 @@ router.post('/login', async (req, res) => {
 // Complete login after 2FA code
 router.post('/verify-2fa', async (req, res) => {
   try {
-    const rate = checkRateLimit(clientKey(req, 'verify2fa'), 15, 15 * 60 * 1000);
-    if (!rate.allowed) {
-      return res.status(429).json({ success: false, message: 'Too many attempts. Try again later.' });
-    }
-
     const { email, code } = req.body;
     if (!email || !code) {
       return res.status(400).json({ success: false, message: 'Email and verification code are required.' });
     }
 
     const normalizedEmail = String(email).toLowerCase().trim();
+
+    const ipRate = checkRateLimit(clientKey(req, 'verify2fa'), 15, 15 * 60 * 1000);
+    if (!ipRate.allowed) {
+      return res.status(429).json({ success: false, message: 'Too many attempts. Try again later.' });
+    }
+    // Per-email lockout so distributed IPs cannot brute-force a 6-digit OTP.
+    const emailRate = checkRateLimit(`verify2fa:email:${normalizedEmail}`, 8, 15 * 60 * 1000);
+    if (!emailRate.allowed) {
+      return res.status(429).json({ success: false, message: 'Too many attempts for this account. Try again later.' });
+    }
+
     const pending = pending2fa.get(normalizedEmail);
     if (!pending || pending.expiresAt < Date.now()) {
       pending2fa.delete(normalizedEmail);
@@ -673,7 +679,7 @@ router.get('/me', authMiddleware, (req, res) => {
 
 /**
  * Activate membership ONLY after a confirmed Razorpay payment.
- * Body: { razorpay_order_id, planId?, byokCredentials? }
+ * Body: { razorpay_order_id, byokCredentials? }
  * Prefer /api/payment/verify which activates automatically after pay.
  * This endpoint is a recovery path if verify activated payment but membership lagged.
  */
@@ -684,7 +690,7 @@ router.post('/activate-membership', authMiddleware, async (req, res) => {
       return res.status(429).json({ success: false, message: 'Too many activation attempts. Try again later.' });
     }
 
-    const { razorpay_order_id, planId, byokCredentials } = req.body || {};
+    const { razorpay_order_id, byokCredentials } = req.body || {};
     if (!razorpay_order_id) {
       return res.status(402).json({
         success: false,
@@ -718,15 +724,15 @@ router.post('/activate-membership', authMiddleware, async (req, res) => {
       });
     }
 
-    const resolvedPlanId = payment.planId || planId;
-    if (!resolvedPlanId) {
+    // Never accept client planId — plan must come from the paid payment record.
+    if (!payment.planId) {
       return res.status(400).json({ success: false, message: 'No plan linked to this payment.' });
     }
 
     try {
       const result = await activateMembershipForUser({
         userId,
-        planId: resolvedPlanId,
+        planId: payment.planId,
         byokCredentials: byokCredentials || null,
         existingUser: req.user
       });
@@ -871,34 +877,65 @@ router.post('/update-password', authMiddleware, async (req, res) => {
   }
 });
 
-// Toggle 2-Factor Authentication
+// Toggle 2-Factor Authentication (disabling requires current password)
 router.post('/toggle-2fa', authMiddleware, async (req, res) => {
   try {
-    const { enabled } = req.body;
+    const { enabled, password } = req.body || {};
+    const wantEnabled = !!enabled;
+    const userId = String(req.user._id || req.user.id);
+
     try {
-      const user = await User.findById(req.user._id || req.user.id);
+      const user = await User.findById(userId);
       if (user) {
-        user.twoFactorEnabled = !!enabled;
-        await user.save();
-      } else {
-        const mem = memoryUsers.get(String(req.user._id || req.user.id));
-        if (mem) {
-          mem.twoFactorEnabled = !!enabled;
-          memoryUsers.set(String(mem._id), mem);
+        if (!wantEnabled && user.twoFactorEnabled) {
+          if (!password) {
+            return res.status(400).json({
+              success: false,
+              message: 'Current password is required to turn off 2FA.'
+            });
+          }
+          const ok = await user.comparePassword(password);
+          if (!ok) {
+            return res.status(400).json({ success: false, message: 'Current password does not match.' });
+          }
         }
+        user.twoFactorEnabled = wantEnabled;
+        await user.save();
+        return res.json({
+          success: true,
+          twoFactorEnabled: wantEnabled,
+          message: wantEnabled
+            ? '2-Factor Authentication activated. Login OTP verification enabled.'
+            : '2-Factor Authentication turned off.'
+        });
       }
     } catch {
-      const mem = memoryUsers.get(String(req.user._id || req.user.id));
-      if (mem) {
-        mem.twoFactorEnabled = !!enabled;
-        memoryUsers.set(String(mem._id), mem);
+      // fall through to memory user
+    }
+
+    const mem = memoryUsers.get(userId);
+    if (!mem) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    if (!wantEnabled && mem.twoFactorEnabled) {
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Current password is required to turn off 2FA.'
+        });
+      }
+      const ok = await compareSecret(password, mem.password);
+      if (!ok) {
+        return res.status(400).json({ success: false, message: 'Current password does not match.' });
       }
     }
+    mem.twoFactorEnabled = wantEnabled;
+    memoryUsers.set(String(mem._id), mem);
 
     res.json({
       success: true,
-      twoFactorEnabled: !!enabled,
-      message: enabled
+      twoFactorEnabled: wantEnabled,
+      message: wantEnabled
         ? '2-Factor Authentication activated. Login OTP verification enabled.'
         : '2-Factor Authentication turned off.'
     });

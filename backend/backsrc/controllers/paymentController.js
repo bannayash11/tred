@@ -7,7 +7,6 @@ import {
   getByokSalesEnabled,
   getRazorpayPaymentsEnabled,
   getUtrPaymentsEnabled,
-  getUtrAutoApproveEnabled,
   getUtrPayDetails
 } from '../services/membershipPlans.js';
 import { connectByok } from '../services/byokSessionService.js';
@@ -381,62 +380,22 @@ export const submitUtrPayment = async (req, res) => {
       });
     }
 
-    const autoApprove = getUtrAutoApproveEnabled();
-
-    let paymentDoc = await Payment.create({
+    // Always pending — membership only after admin manual Approve.
+    const paymentDoc = await Payment.create({
       userId,
       customerDetails,
       orderId: makeUtrOrderId(),
       amount: amountInr,
       currency: 'INR',
-      status: autoApprove ? 'paid' : 'pending',
+      status: 'pending',
       gateway: 'utr',
       paymentMethod: 'upi',
       utr,
       planId: plan.id,
       planName: plan.name,
       membershipActivated: false,
-      adminNote: autoApprove ? 'Auto-approved on UTR submit' : null,
-      reviewedAt: autoApprove ? new Date() : null,
       ...(pendingByokCipher ? { pendingByokCipher } : {})
     });
-
-    if (autoApprove) {
-      paymentDoc = await Payment.findById(paymentDoc._id).select('+pendingByokCipher');
-      let activation;
-      try {
-        activation = await activateMembershipFromPayment(paymentDoc);
-      } catch (actErr) {
-        console.error('[Payment] UTR auto-approve activation failed:', actErr);
-        return res.status(201).json({
-          success: true,
-          paymentVerified: true,
-          membershipActivated: false,
-          autoApproved: true,
-          message:
-            actErr.message ||
-            'UTR auto-approved but membership activation failed. Contact support with your UTR.',
-          payment: toPublicPayment(paymentDoc),
-          orderId: paymentDoc.orderId,
-          status: 'paid',
-          user: null
-        });
-      }
-
-      return res.status(201).json({
-        success: true,
-        paymentVerified: true,
-        membershipActivated: !!activation.activated,
-        autoApproved: true,
-        message: activation.activated
-          ? 'UTR received. Membership is now active.'
-          : 'UTR auto-approved.',
-        payment: toPublicPayment(paymentDoc),
-        orderId: paymentDoc.orderId,
-        status: 'paid',
-        user: activation.user || null
-      });
-    }
 
     return res.status(201).json({
       success: true,
@@ -444,7 +403,7 @@ export const submitUtrPayment = async (req, res) => {
       membershipActivated: false,
       autoApproved: false,
       message:
-        'UTR submitted. Membership activates after admin verifies your payment (usually within a few hours).',
+        'UTR submitted. Please wait for payment confirmation — this can take up to 24 hours. Membership activates after we verify your payment.',
       payment: toPublicPayment(paymentDoc),
       orderId: paymentDoc.orderId,
       status: 'pending'

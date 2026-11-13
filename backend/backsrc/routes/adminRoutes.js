@@ -529,9 +529,7 @@ router.post('/settings/payments', authMiddleware, adminOnly, async (req, res) =>
     const next = setPaymentMethodsSettings({
       razorpayEnabled:
         req.body.razorpayEnabled !== undefined ? req.body.razorpayEnabled : current.razorpayEnabled,
-      utrEnabled: req.body.utrEnabled !== undefined ? req.body.utrEnabled : current.utrEnabled,
-      utrAutoApprove:
-        req.body.utrAutoApprove !== undefined ? req.body.utrAutoApprove : current.utrAutoApprove
+      utrEnabled: req.body.utrEnabled !== undefined ? req.body.utrEnabled : current.utrEnabled
     });
     if (!next.razorpayEnabled && !next.utrEnabled) {
       // Keep at least one method on — revert last write in memory
@@ -550,7 +548,7 @@ router.post('/settings/payments', authMiddleware, adminOnly, async (req, res) =>
       success: true,
       message: `Payment methods updated — Razorpay ${next.razorpayEnabled ? 'ON' : 'OFF'}, UTR ${
         next.utrEnabled ? 'ON' : 'OFF'
-      }, UTR auto-approve ${next.utrAutoApprove ? 'ON' : 'OFF'}.`,
+      }. UTR needs manual admin approve for membership.`,
       ...next,
       utrPay: getUtrPayDetails()
     });

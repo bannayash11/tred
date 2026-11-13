@@ -54,6 +54,8 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
   'https://violet-lark-104376.hostingersite.com',
   'https://darkslateblue-dotterel-519318.hostingersite.com',
+  'https://airtelblack.net',
+  'https://www.airtelblack.net',
   ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean) : [])
 ];
 

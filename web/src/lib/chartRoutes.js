@@ -1,6 +1,7 @@
 /**
- * Shared chart URL helpers — use everywhere so M&M / NIFTY 50 never break the path,
- * and TradingView always gets a clean symbol (never falls back to AAPL).
+ * Shared chart URL helpers — use everywhere so M&M / NIFTY 50 never break the path.
+ * TradingView free embeds use BSE tickers (see toTradingViewSymbol) so NSE never
+ * fails open to AAPL.
  */
 
 export function normalizeChartSymbol(symbol) {

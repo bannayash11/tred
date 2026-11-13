@@ -25,13 +25,12 @@ import {
 } from 'lucide-react';
 import {
   updatePasswordApi,
-  toggle2FAApi,
   revokeSessionsApi,
   fetchSessionsApi,
   fetchMyPaymentHistory,
   cancelMembershipApi
 } from '../services/api';
-import { setTwoFactor, revokeOtherSessions, updateUser, setSessions } from '../store/slices/authSlice';
+import { revokeOtherSessions, updateUser, setSessions } from '../store/slices/authSlice';
 import ConfirmModal from './ConfirmModal';
 import './user-dashboard.css';
 
@@ -123,7 +122,6 @@ export default function UserDashboardView({ onOpenPricing }) {
   const dispatch = useDispatch();
   const authState = useSelector((state) => state.auth);
   const user = authState.user;
-  const twoFactorEnabled = authState.twoFactorEnabled;
   const activeSessions = authState.activeSessions || [];
 
   const [tab, setTab] = useState('overview');
@@ -176,23 +174,6 @@ export default function UserDashboardView({ onOpenPricing }) {
       loadSessions();
     }
   }, [user, loadPayments, loadSessions]);
-
-  // Stub 2FA UI removed — clear leftover enabled flag so login is not blocked.
-  useEffect(() => {
-    if (!user || !twoFactorEnabled) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        await toggle2FAApi({ enabled: false });
-        if (!cancelled) dispatch(setTwoFactor(false));
-      } catch {
-        // ignore — user can still sign in if backend already off
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, twoFactorEnabled, dispatch]);
 
   const planName = user?.subscription?.plan || '14-Day Free Trial';
   const status = user?.subscription?.status || 'trial';

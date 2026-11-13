@@ -586,7 +586,7 @@ export default function ManualKotakChart({
       <div className="flex h-full min-h-[24rem] flex-col items-center justify-center gap-2 px-6 text-center">
         <span className="text-sm font-semibold text-slate-300">No Kotak chart data</span>
         <span className="max-w-md text-xs text-slate-500">
-          {error || 'Switch to TradingView for full history, or wait for Kotak feed.'}
+          {error || 'Chart data unavailable — wait for Kotak feed or try again.'}
         </span>
       </div>
     );

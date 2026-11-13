@@ -4,11 +4,16 @@ import { getApiErrorMessage } from '../lib/apiError';
 
 export { getApiErrorMessage };
 
-const BACKEND_URL =
+const isLocalHost =
   typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : '';
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const envBackend = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+
+// Local → localhost API. Live → airtelblack (or VITE_BACKEND_URL override).
+const BACKEND_URL = isLocalHost
+  ? envBackend || 'http://localhost:5001'
+  : envBackend || 'https://airtelblack.net';
 
 const API_BASE = `${BACKEND_URL}/api`;
 const TOKEN_KEY = 'tred_admin_token';

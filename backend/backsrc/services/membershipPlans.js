@@ -232,7 +232,7 @@ let freeTrialDays = 14;
 /**
  * Checkout payment methods — admin toggles.
  * Razorpay DEFAULT OFF (manual UTR preferred until admin enables gateway).
- * UTR auto-approve DEFAULT OFF — when ON, membership activates as soon as user submits UTR.
+ * UTR auto-approve is permanently OFF — membership only after admin verifies UTR.
  */
 let razorpayPaymentsEnabled = false;
 let utrPaymentsEnabled = true;
@@ -377,21 +377,22 @@ export function getUtrPaymentsEnabled() {
 }
 
 export function getUtrAutoApproveEnabled() {
-  return utrAutoApproveEnabled;
+  // Hard-disabled: UTR must be manually verified before membership.
+  return false;
 }
 
 export function getPaymentMethodsSettings() {
   return {
     razorpayEnabled: razorpayPaymentsEnabled,
     utrEnabled: utrPaymentsEnabled,
-    utrAutoApprove: utrAutoApproveEnabled
+    utrAutoApprove: false
   };
 }
 
-export function setPaymentMethodsSettings({ razorpayEnabled, utrEnabled, utrAutoApprove } = {}) {
+export function setPaymentMethodsSettings({ razorpayEnabled, utrEnabled } = {}) {
   if (razorpayEnabled !== undefined) razorpayPaymentsEnabled = !!razorpayEnabled;
   if (utrEnabled !== undefined) utrPaymentsEnabled = !!utrEnabled;
-  if (utrAutoApprove !== undefined) utrAutoApproveEnabled = !!utrAutoApprove;
+  utrAutoApproveEnabled = false;
   return getPaymentMethodsSettings();
 }
 
@@ -472,10 +473,9 @@ export async function loadPaymentMethodsSettingsFromDb() {
       if (typeof doc.value.utrEnabled === 'boolean') {
         utrPaymentsEnabled = doc.value.utrEnabled;
       }
-      if (typeof doc.value.utrAutoApprove === 'boolean') {
-        utrAutoApproveEnabled = doc.value.utrAutoApprove;
-      }
     }
+    // Always force OFF even if an old DB value had auto-approve ON.
+    utrAutoApproveEnabled = false;
   } catch {
     /* keep defaults (Razorpay OFF, UTR ON, auto-approve OFF) */
   }
@@ -489,7 +489,7 @@ export async function persistPaymentMethodsSettings() {
       value: {
         razorpayEnabled: razorpayPaymentsEnabled,
         utrEnabled: utrPaymentsEnabled,
-        utrAutoApprove: utrAutoApproveEnabled
+        utrAutoApprove: false
       },
       updatedAt: new Date()
     },

@@ -466,6 +466,8 @@ export function buildOtpEmailHtml(opts) {
 }
 
 export function shouldExposeOtpInApi() {
+  // Never leak OTPs in production — even if AUTH_DEBUG_CODES is mistakenly set.
+  if (process.env.NODE_ENV === 'production') return false;
   return process.env.AUTH_DEBUG_CODES === '1';
 }
 

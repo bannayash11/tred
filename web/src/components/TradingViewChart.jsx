@@ -1,14 +1,22 @@
 import React, { useId, useMemo, useState, useEffect } from 'react';
 
-const INDEX_MAP = {
+/**
+ * Free TradingView embeds block NSE candle data ("This symbol is only available
+ * on TradingView") and then fall back to NASDAQ:AAPL. Same Indian tickers work
+ * on BSE (EOD). Indices stay NSE-only on TV.com — we don't embed those.
+ */
+const INDEX_EMBED = {
+  SENSEX: 'BSE:SENSEX'
+};
+
+const INDEX_EXTERNAL = {
   'NIFTY 50': 'NSE:NIFTY',
   NIFTY50: 'NSE:NIFTY',
   NIFTY: 'NSE:NIFTY',
   BANKNIFTY: 'NSE:BANKNIFTY',
   'BANK NIFTY': 'NSE:BANKNIFTY',
   FINNIFTY: 'NSE:FINNIFTY',
-  MIDCPNIFTY: 'NSE:MIDCPNIFTY',
-  SENSEX: 'BSE:SENSEX'
+  MIDCPNIFTY: 'NSE:MIDCPNIFTY'
 };
 
 const INTERVAL_MAP = {
@@ -20,14 +28,52 @@ const INTERVAL_MAP = {
   '1d': 'D'
 };
 
-/** Map app symbol → TradingView EXCHANGE:SYMBOL */
+/** BSE embed ticker: BAJAJ-AUTO → BAJAJ_AUTO, M&M → M_M, GVT&D → GVT_D */
+function toBseTicker(ticker) {
+  return String(ticker || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[-&]/g, '_');
+}
+
+/**
+ * Map app symbol → TradingView EXCHANGE:SYMBOL for the free embed.
+ * Equities use BSE (NSE is blocked in widgets). Returns '' when embed can't show it.
+ */
 export function toTradingViewSymbol(symbol) {
   const raw = String(symbol || '').trim().toUpperCase();
+  if (!raw) return 'BSE:SENSEX';
+
+  if (INDEX_EMBED[raw]) return INDEX_EMBED[raw];
+  if (INDEX_EXTERNAL[raw]) return ''; // blocked in free embeds
+
+  if (raw.includes(':')) {
+    const colon = raw.indexOf(':');
+    const ex = raw.slice(0, colon);
+    const ticker = raw.slice(colon + 1);
+    if (INDEX_EMBED[ticker]) return INDEX_EMBED[ticker];
+    if (INDEX_EXTERNAL[ticker]) return '';
+    if (ex === 'NSE' || ex === 'BSE') return `BSE:${toBseTicker(ticker)}`;
+    return raw;
+  }
+
+  return `BSE:${toBseTicker(raw)}`;
+}
+
+/** Symbol to open on tradingview.com when the embed can't show it */
+export function toTradingViewExternalSymbol(symbol) {
+  const raw = String(symbol || '').trim().toUpperCase();
   if (!raw) return 'NSE:NIFTY';
-  if (INDEX_MAP[raw]) return INDEX_MAP[raw];
+  if (INDEX_EXTERNAL[raw]) return INDEX_EXTERNAL[raw];
+  if (INDEX_EMBED[raw]) return INDEX_EMBED[raw];
   if (raw.includes(':')) return raw;
-  // M&M, BAJAJ-AUTO etc. stay as-is for NSE
   return `NSE:${raw.replace(/\s+/g, '')}`;
+}
+
+export function tradingViewSymbolUrl(tvSymbol) {
+  if (!tvSymbol) return 'https://www.tradingview.com/';
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`;
 }
 
 export function toTradingViewInterval(timeframe) {
@@ -66,10 +112,12 @@ export default function TradingViewChart({
     [reactId]
   );
   const tvSymbol = toTradingViewSymbol(symbol);
+  const externalSymbol = toTradingViewExternalSymbol(symbol);
   const interval = toTradingViewInterval(timeframe);
   const isNarrow = useIsNarrow(768);
 
   const iframeSrc = useMemo(() => {
+    if (!tvSymbol) return '';
     const config = {
       autosize: true,
       width: '100%',
@@ -111,16 +159,37 @@ export default function TradingViewChart({
       <div
         className="tradingview-widget-container absolute inset-0 overflow-hidden rounded-lg border border-slate-800/70"
         style={{ width: '100%', height: '100%' }}
-        title={tvSymbol}
+        title={tvSymbol || externalSymbol}
       >
-        <iframe
-          id={frameId}
-          key={`${tvSymbol}-${interval}-${isNarrow ? 'm' : 'd'}`}
-          title={`TradingView ${tvSymbol}`}
-          src={iframeSrc}
-          style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
-          allow="fullscreen"
-        />
+        {tvSymbol && iframeSrc ? (
+          <iframe
+            id={frameId}
+            key={`${tvSymbol}-${interval}-${isNarrow ? 'm' : 'd'}`}
+            title={`TradingView ${tvSymbol}`}
+            src={iframeSrc}
+            style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
+            allow="fullscreen"
+          />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 bg-[#090d16] px-6 text-center">
+            <p className="text-sm font-semibold text-slate-200">
+              {externalSymbol} isn’t available in the free TradingView embed
+            </p>
+            <p className="max-w-md text-[12px] leading-relaxed text-slate-400">
+              NSE indices can’t be charted in the widget (it would fall back to Apple). Use{' '}
+              <span className="text-cyan-300">Manual</span> for live Kotak candles, or open the
+              full chart on TradingView.
+            </p>
+            <a
+              href={tradingViewSymbolUrl(externalSymbol)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md bg-amber-500 px-3 py-1.5 text-[12px] font-semibold text-black hover:bg-amber-400"
+            >
+              Open {externalSymbol} on TradingView
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

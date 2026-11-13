@@ -11,7 +11,6 @@ export default function PaymentSettings() {
   const isSuperAdmin = adminUser?.role === 'admin';
   const razorpayEnabled = !!systemSettings?.razorpayEnabled;
   const utrEnabled = systemSettings?.utrEnabled !== false;
-  const utrAutoApprove = !!systemSettings?.utrAutoApprove;
   const [methodsSaving, setMethodsSaving] = useState(false);
   const [utrSaving, setUtrSaving] = useState(false);
   const [qrUploading, setQrUploading] = useState(false);
@@ -40,15 +39,11 @@ export default function PaymentSettings() {
     }
     const next = {
       razorpayEnabled: which === 'razorpay' ? !razorpayEnabled : razorpayEnabled,
-      utrEnabled: which === 'utr' ? !utrEnabled : utrEnabled,
-      utrAutoApprove: which === 'utrAutoApprove' ? !utrAutoApprove : utrAutoApprove
+      utrEnabled: which === 'utr' ? !utrEnabled : utrEnabled
     };
     if (!next.razorpayEnabled && !next.utrEnabled) {
       showToast?.('At least one payment method must stay ON.');
       return;
-    }
-    if (which === 'utr' && next.utrEnabled === false) {
-      next.utrAutoApprove = false;
     }
     setMethodsSaving(true);
     try {
@@ -161,25 +156,11 @@ export default function PaymentSettings() {
             >
               UPI + UTR: {utrEnabled ? 'ON' : 'OFF'}
             </button>
-            <button
-              type="button"
-              disabled={methodsSaving || !isSuperAdmin || !utrEnabled}
-              onClick={() => toggleMethod('utrAutoApprove')}
-              className={`rounded-lg border px-3.5 py-2 text-xs font-semibold transition ${
-                utrAutoApprove
-                  ? 'border-admin-accent/40 bg-admin-accent/10 text-admin-accent'
-                  : 'border-admin-border bg-admin-bg text-admin-muted'
-              } ${!isSuperAdmin || !utrEnabled ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90'}`}
-            >
-              UTR Auto-approve: {utrAutoApprove ? 'ON' : 'OFF'}
-            </button>
           </div>
         </div>
-        {utrAutoApprove ? (
-          <p className="text-xs text-admin-accent">
-            Auto-approve is on: submitted UTRs activate membership without manual review.
-          </p>
-        ) : null}
+        <p className="text-xs text-admin-muted">
+          UTR payments stay pending until you Approve in Payment history — that activates membership.
+        </p>
       </Panel>
 
       <Panel className="p-4">
