@@ -108,7 +108,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
               className="group flex w-full sm:w-auto items-center justify-center space-x-2.5 rounded-2xl bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-600 px-8 py-4 text-sm font-extrabold text-black hover:opacity-95 transition-all shadow-xl shadow-cyan-500/25 hover:scale-105 active:scale-95"
             >
               <Zap className="h-4 w-4 fill-black" />
-              <span>Launch Live Terminal</span>
+              <span>Launch Live Charts</span>
               <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
             </button>
 
@@ -133,7 +133,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             </div>
             <div className="flex items-center space-x-1.5">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span>Built-in TradingView Charts</span>
+              <span>Built-in Live Charts</span>
             </div>
           </div>
         </div>
@@ -219,12 +219,12 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
 
             {/* Bottom Bar inside Mockup */}
             <div className="mt-3 flex items-center justify-between px-3 text-xs text-slate-400">
-              <span>Click any card to inspect full TradingView chart with zone lines</span>
+              <span>Click any card to inspect full chart with zone lines</span>
               <button
                 onClick={onLaunchTerminal}
                 className="text-cyan-400 hover:underline font-bold flex items-center space-x-1"
               >
-                <span>Open Terminal</span>
+                <span>Open Charts</span>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -291,7 +291,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             </div>
             <h3 className="text-xl font-bold text-white">2. Automatic Chart Overlays</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Click any stock to open high-speed TradingView Lightweight Charts. No manual drawing required — Order Block boxes, Stop Loss levels, and Buy/Sell-side Liquidity targets appear automatically.
+              Click any stock to open high-speed live charts. No manual drawing required — Order Block boxes, Stop Loss levels, and Buy/Sell-side Liquidity targets appear automatically.
             </p>
             <div className="flex items-center space-x-2 text-xs font-mono text-emerald-400">
               <CheckCircle2 className="h-4 w-4" />
@@ -380,7 +380,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             12-Month Institutional Access Bundle
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-            Get full access to all terminal screeners, pop-up charts, and community at ~₹22/day.
+            Get full access to all live charts, setup boards, and community at ~₹22/day.
           </p>
         </div>
 
@@ -389,7 +389,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
           <div className="flex justify-between items-center border-b border-slate-800 pb-4">
             <div>
               <span className="text-sm font-bold text-white">6 Months + 6 Months Free Bundle</span>
-              <p className="text-xs text-emerald-400 font-medium">12 Full Months of Unrestricted Terminal Access</p>
+              <p className="text-xs text-emerald-400 font-medium">12 Full Months of Unrestricted Charts Access</p>
             </div>
             <span className="rounded-full bg-cyan-950 px-2.5 py-1 text-[11px] font-bold text-cyan-400 border border-cyan-800">
               SAVE 72%
@@ -442,7 +442,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
             },
             {
               q: 'Does it work for both Intraday and Swing Trading?',
-              a: 'Yes. The terminal scans multiple timeframes (1-minute, 5-minute for intraday scalping/momentum, and 15-minute/hourly for multi-day swing holding).'
+              a: 'Yes. Charts scan multiple timeframes (1-minute, 5-minute for intraday scalping/momentum, and 15-minute/hourly for multi-day swing holding).'
             },
             {
               q: 'Can I use this on mobile phone?',
@@ -472,7 +472,7 @@ export default function HomePage({ onLaunchTerminal, onOpenPricing, onSelectStoc
               className="inline-flex items-center space-x-2 rounded-2xl bg-cyan-500 hover:bg-cyan-400 px-8 py-3.5 text-sm font-extrabold text-slate-950 hover:brightness-105 active:scale-[0.99] transition-all shadow-xl shadow-cyan-500/25 cursor-pointer"
             >
               <Zap className="h-4 w-4 fill-slate-950" />
-              <span>Launch Live Terminal Now</span>
+              <span>Launch Live Charts Now</span>
             </button>
           </div>
         </div>

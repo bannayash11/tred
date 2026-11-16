@@ -360,7 +360,7 @@ export default function PlanForm() {
               Features
             </div>
             <FeatureToggle
-              label="Live Terminal"
+              label="Live Charts"
               icon={LayoutDashboard}
               checked={form.allowTerminal}
               onChange={(v) => setForm({ ...form, allowTerminal: v })}

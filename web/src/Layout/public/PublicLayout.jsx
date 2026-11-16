@@ -47,6 +47,7 @@ export default function PublicLayout() {
   const [liveUpdatedSymbols, setLiveUpdatedSymbols] = useState(new Set());
   const [niftyData, setNiftyData] = useState(null);
   const [bankNiftyData, setBankNiftyData] = useState(null);
+  const [feedMeta, setFeedMeta] = useState(null);
 
   useEffect(() => {
     setUser(authUser);
@@ -105,6 +106,7 @@ export default function PublicLayout() {
       .then((res) => {
         if (res.success) {
           setScreenerDataState(res.data);
+          if (res.feed) setFeedMeta(res.feed);
           dispatch(
             setScreenerData({
               all: res.data.allStocks,
@@ -116,13 +118,17 @@ export default function PublicLayout() {
       })
       .catch((err) => {
         console.error('Screener fetch error:', err);
-        setApiBanner(err.userMessage || 'Cannot load live screener right now.');
+        if (err.response?.data?.feed) setFeedMeta(err.response.data.feed);
+        setApiBanner(
+          err.response?.data?.message || err.userMessage || 'Cannot load live screener right now.'
+        );
       });
 
     fetchMarketXRay()
       .then((res) => {
         if (res.success) {
           setXrayDataState(res.data);
+          if (res.feed) setFeedMeta(res.feed);
           dispatch(setMarketXRay(res.data));
         }
       })
@@ -147,6 +153,8 @@ export default function PublicLayout() {
 
     socket.on('INITIAL_STATE', (payload) => {
       applyScreener(payload.screener);
+      if (payload.feed) setFeedMeta(payload.feed);
+      if (payload.error) setApiBanner(payload.error);
       if (payload.marketXRay) {
         setXrayDataState(payload.marketXRay);
         dispatch(setMarketXRay(payload.marketXRay));
@@ -299,6 +307,7 @@ export default function PublicLayout() {
           context={{
             screenerData: screenerDataState,
             xrayData: xrayDataState,
+            feedMeta,
             onSelectStock: openStockChart,
             liveUpdatedSymbols,
             user,
@@ -314,7 +323,7 @@ export default function PublicLayout() {
       <ConfirmModal
         open={showLogoutConfirm}
         title="Sign out?"
-        message="You will need to sign in again to access your dashboard and terminal."
+        message="You will need to sign in again to access your dashboard and Charts."
         confirmLabel="Sign Out"
         cancelLabel="Stay Signed In"
         danger

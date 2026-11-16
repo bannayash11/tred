@@ -21,6 +21,8 @@ import orderFlowRoutes from './routes/orderFlowRoutes.js';
 import paymentRoutes, { handlePaymentWebhook } from './routes/paymentRoutes.js';
 import { marketDataService } from './services/marketDataService.js';
 import { orderFlowService } from './services/orderFlowService.js';
+import { byokMarketRuntime } from './services/byokMarketRuntime.js';
+import { classifyUserFeedMode, loadUserWithByokSecrets } from './services/byokSessionService.js';
 import { seedDefaultAdmin } from './utils/seedDefaultAdmin.js';
 import { JWT_SECRET, memoryUsers } from './middleware/authMiddleware.js';
 import { isSubscriptionActive } from './utils/security.js';
@@ -32,6 +34,7 @@ import {
   loadUtrPayDetailsFromDb,
   loadPlansFromDb
 } from './services/membershipPlans.js';
+import { loadPlatformBrokerFromDb } from './services/platformBrokerService.js';
 import { loadSmtpSettingsFromDb, loadEmailTemplatesFromDb } from './services/emailService.js';
 import { loadSocialMediaFromDb } from './services/socialMediaService.js';
 import jwt from 'jsonwebtoken';
@@ -137,7 +140,10 @@ async function resolveSocketUser(token) {
     return null;
   }
   try {
-    const user = await User.findById(decoded.id).select('-password');
+    // Include BYOK ciphers so Terminal sockets can start user feed
+    const user = await User.findById(decoded.id).select(
+      '+byok.secretsCipher +byok.sessionCipher -password'
+    );
     if (user) return user;
   } catch {
     // DB offline
@@ -169,14 +175,48 @@ io.use(async (socket, next) => {
   }
 });
 
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   console.log(`[Socket.io] Client connected: ${socket.id} (${socket.data.user?.email || 'user'})`);
 
-  socket.emit('INITIAL_STATE', {
-    screener: marketDataService.getScreenerData(),
-    marketXRay: marketDataService.getMarketXRay(),
-    openingMomentum: marketDataService.getOpeningMomentumData()
-  });
+  const user = socket.data.user;
+  const feedMode = classifyUserFeedMode(user);
+
+  if (feedMode === 'byok') {
+    const userId = String(user._id || user.id);
+    socket.join(`byok:${userId}`);
+    try {
+      const full = user.byok?.sessionCipher
+        ? user
+        : await loadUserWithByokSecrets(user);
+      const { session, feed, error } = await byokMarketRuntime.getSessionForUser(full || user);
+      if (error || !session) {
+        socket.emit('INITIAL_STATE', {
+          screener: { allStocks: [], bullishSetups: [], bearishSetups: [], totalBullish: 0, totalBearish: 0, timestamp: Date.now() },
+          marketXRay: null,
+          openingMomentum: null,
+          feed: feed || { mode: 'byok', provider: null, label: 'BYOK · connect broker' },
+          error: error || 'Connect your broker to load live data.'
+        });
+      } else {
+        socket.emit('INITIAL_STATE', session.getInitialState());
+      }
+    } catch (err) {
+      socket.emit('INITIAL_STATE', {
+        screener: { allStocks: [], bullishSetups: [], bearishSetups: [], totalBullish: 0, totalBearish: 0, timestamp: Date.now() },
+        marketXRay: null,
+        openingMomentum: null,
+        feed: { mode: 'byok', provider: null, label: 'BYOK' },
+        error: err.message
+      });
+    }
+  } else {
+    socket.emit('INITIAL_STATE', {
+      screener: marketDataService.getScreenerData(),
+      marketXRay: marketDataService.getMarketXRay(),
+      openingMomentum: marketDataService.getOpeningMomentumData(),
+      feed: { mode: 'server', provider: 'kotak', label: 'Platform · Kotak' }
+    });
+  }
 
   socket.on('SUBSCRIBE_STOCK', (symbol) => {
     if (!socket.data.user || !isSubscriptionActive(socket.data.user)) return;
@@ -225,7 +265,8 @@ async function connectMongo(attempt = 1) {
         loadUtrPayDetailsFromDb(),
         loadSmtpSettingsFromDb(),
         loadEmailTemplatesFromDb(),
-        loadSocialMediaFromDb()
+        loadSocialMediaFromDb(),
+        loadPlatformBrokerFromDb()
       ]);
       console.log('[Membership] Plans + BYOK + free-trial + payment-methods + UTR + SMTP + email templates + social loaded from DB.');
     } catch (planErr) {
@@ -265,8 +306,9 @@ connectMongo();
 
 // Initialize Market Data & SMC Engine
 marketDataService.initialize(io);
+byokMarketRuntime.attachIo(io);
 
-// Initialize Kotak-powered Order Flow board builder
+// Initialize Kotak-powered Order Flow board builder (platform / server-plan users)
 orderFlowService.initialize().catch((err) => {
   console.error('[OrderFlow] Failed to initialize:', err.message || err);
 });

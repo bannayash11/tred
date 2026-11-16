@@ -576,7 +576,7 @@ export default function ManualKotakChart({
     return (
       <div className="flex h-full min-h-[24rem] flex-col items-center justify-center gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400/30 border-t-cyan-400" />
-        <p className="text-xs text-slate-400">Loading Kotak {timeframe} candles…</p>
+        <p className="text-xs text-slate-400">Loading {timeframe} candles…</p>
       </div>
     );
   }
@@ -584,9 +584,9 @@ export default function ManualKotakChart({
   if (error || !stockData?.candles?.length) {
     return (
       <div className="flex h-full min-h-[24rem] flex-col items-center justify-center gap-2 px-6 text-center">
-        <span className="text-sm font-semibold text-slate-300">No Kotak chart data</span>
+        <span className="text-sm font-semibold text-slate-300">No chart data</span>
         <span className="max-w-md text-xs text-slate-500">
-          {error || 'Chart data unavailable — wait for Kotak feed or try again.'}
+          {error || 'Chart data unavailable — wait for your broker feed or try again.'}
         </span>
       </div>
     );

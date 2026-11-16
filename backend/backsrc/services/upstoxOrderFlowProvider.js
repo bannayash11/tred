@@ -25,8 +25,8 @@ const INDEX_NAME = {
   SENSEX50: 'SENSEX50'
 };
 
-export function createUpstoxOrderFlowProvider(universe) {
-  const token = process.env.UPSTOX_ACCESS_TOKEN || '';
+export function createUpstoxOrderFlowProvider(universe, options = {}) {
+  const token = String(options.accessToken || process.env.UPSTOX_ACCESS_TOKEN || '').trim();
   /** symbol → { key, futures: [{ key, expiry }], expiries: Set } */
   const map = new Map();
   let slots = [];
@@ -65,7 +65,13 @@ export function createUpstoxOrderFlowProvider(universe) {
     label: 'Upstox',
 
     async init() {
-      if (!token) throw new Error('Set UPSTOX_ACCESS_TOKEN in backend/.env');
+      if (!token) {
+        throw new Error(
+          options.accessToken
+            ? 'Upstox access token missing on BYOK session.'
+            : 'Set UPSTOX_ACCESS_TOKEN in backend/.env'
+        );
+      }
       const wanted = new Map(universe.map((u) => [INDEX_NAME[u.symbol] ?? u.symbol, u.symbol]));
       for (const url of INSTRUMENTS) {
         const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });

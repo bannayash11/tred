@@ -23,7 +23,7 @@ import { useTheme } from '../context/ThemeContext';
 
 const NAV_ITEMS = [
   { id: 'home', label: 'Home', path: '/', icon: Home },
-  { id: 'terminal', label: 'Terminal', path: '/terminal', icon: LayoutDashboard, live: true, authRequired: true },
+  { id: 'terminal', label: 'Charts', path: '/terminal', icon: LayoutDashboard, live: true, authRequired: true },
   { id: 'order-flow', label: 'Order Flow', path: '/order-flow', icon: GitBranch, live: true, authRequired: true },
   { id: 'momentum', label: '5M Momentum', path: '/momentum', icon: Zap, live: true, authRequired: true },
   { id: 'xray', label: 'Market X-Ray', path: '/xray', icon: Activity, authRequired: true }
@@ -328,7 +328,7 @@ export default function Navbar({
                   </span>
                 </div>
                 <span className="hidden md:block text-[10px] text-slate-500 font-medium -mt-0.5">
-                  SMC & Liquidity Terminal
+                  SMC & Liquidity Charts
                 </span>
               </div>
             </button>

@@ -43,7 +43,7 @@ const TABS = [
 const QUICK_LINKS = [
   {
     to: '/terminal',
-    title: 'Terminal',
+    title: 'Charts',
     blurb: 'Live SMC setups',
     icon: Activity,
     tone: 'from-cyan-500/20 to-transparent'
@@ -946,7 +946,7 @@ export default function UserDashboardView({ onOpenPricing }) {
       <ConfirmModal
         open={showCancelConfirm}
         title="Cancel membership?"
-        message="Terminal and premium tools will lock immediately. Past payments stay in your history. You can buy again anytime from Pricing (Razorpay)."
+        message="Charts and premium tools will lock immediately. Past payments stay in your history. You can buy again anytime from Pricing (Razorpay)."
         confirmLabel={cancelling ? 'Cancelling…' : 'Yes, Cancel Membership'}
         cancelLabel="Keep Membership"
         danger

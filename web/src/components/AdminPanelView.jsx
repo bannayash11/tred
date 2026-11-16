@@ -249,10 +249,10 @@ export default function AdminPanelView() {
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h2 className="text-sm font-bold text-white flex items-center">
               <Megaphone className="mr-2 h-4 w-4 text-amber-400" />
-              Live Terminal Broadcast Banner
+              Live Charts Broadcast Banner
             </h2>
             <div className="flex items-center space-x-2 text-xs">
-              <span className="text-slate-400">Show on Terminal:</span>
+              <span className="text-slate-400">Show on Charts:</span>
               <input
                 type="checkbox"
                 checked={announcementEnabled}

@@ -833,6 +833,22 @@ class KotakNeoService {
     const [segment, token] = String(neoSymbol || '').split('|');
     return { segment, token };
   }
+
+  /**
+   * Hot-apply credentials from Admin platform broker store (or refreshed env).
+   * Clears session so the next login uses the new keys.
+   */
+  applyCredentials({ consumerKey, ucc, mobileNumber, mpin, totpKey } = {}) {
+    if (consumerKey != null) this.consumerKey = String(consumerKey);
+    if (ucc != null) this.ucc = String(ucc);
+    if (mobileNumber != null) this.mobileNumber = String(mobileNumber);
+    if (mpin != null) this.mpin = String(mpin);
+    if (totpKey != null) this.totpSecret = String(totpKey);
+    this.isLoggedIn = false;
+    this.baseUrl = null;
+    this.viewToken = null;
+    this.sid = null;
+  }
 }
 
 export const kotakNeoService = new KotakNeoService();

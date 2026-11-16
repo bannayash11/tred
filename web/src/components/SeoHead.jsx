@@ -5,7 +5,7 @@ import { fetchSeoByPath } from '../services/api';
 const SITE_ORIGIN =
   typeof window !== 'undefined' ? window.location.origin : 'https://tradrift.local';
 
-const DEFAULT_TITLE = 'Tradrift — Institutional SMC & Liquidity Terminal';
+const DEFAULT_TITLE = 'Tradrift — Institutional SMC & Liquidity Charts';
 
 function upsertMeta(attr, key, content) {
   if (content === undefined || content === null) return;

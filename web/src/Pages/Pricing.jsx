@@ -211,7 +211,7 @@ export default function Pricing() {
                       <Lock className="h-4 w-4 text-slate-600 shrink-0" />
                     )}
                     <span className={plan.allowTerminal === false ? 'text-slate-500' : ''}>
-                      Live Terminal
+                      Live Charts
                     </span>
                   </div>
                 </div>
@@ -229,7 +229,7 @@ export default function Pricing() {
                 }`}
               >
                 {isCurrent
-                  ? 'Open Terminal'
+                  ? 'Open Charts'
                   : isAuthenticated
                     ? 'Continue to details'
                     : 'Sign up to continue'}

@@ -54,7 +54,7 @@ const UNIVERSES: Array<{ value: FlowUniverse; label: string; title: string }> = 
 
 /** Back only — brand wordmark removed so the board keeps the full strip. */
 const BRAND = (
-  <Link to="/terminal" className="mf-back" aria-label="Back to Terminal">
+  <Link to="/terminal" className="mf-back" aria-label="Back to Charts">
     <span className="mf-back__chev" aria-hidden="true" />
     <span className="mf-back__label">Back</span>
   </Link>

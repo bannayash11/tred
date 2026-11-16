@@ -139,7 +139,7 @@ export function FlowPopup({ flow, mode }: FlowPopupProps) {
             className="mf-popup__tool"
             style={{ whiteSpace: 'nowrap', padding: '0.35rem 0.65rem' }}
             onClick={() => navigate(chartPath(stock.symbol))}
-            title={`Open ${stock.symbol} TradingView chart`}
+            title={`Open ${stock.symbol} chart`}
           >
             Full chart
           </button>

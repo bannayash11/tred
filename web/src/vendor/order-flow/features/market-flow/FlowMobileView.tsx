@@ -187,7 +187,7 @@ export function FlowMobileView({
           <Link
             to="/terminal"
             className="w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white active:scale-95 transition-all"
-            aria-label="Back to Terminal"
+            aria-label="Back to Charts"
           >
             <ChevronLeft size={18} />
           </Link>

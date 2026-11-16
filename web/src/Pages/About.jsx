@@ -70,7 +70,7 @@ export default function About() {
           }
           className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-6 py-3 text-xs font-bold text-black hover:opacity-95 shadow-lg shadow-cyan-500/20 inline-flex items-center space-x-2"
         >
-          <span>{isAuthenticated ? 'Launch Live Screener Terminal' : 'Login to Launch Terminal'}</span>
+          <span>{isAuthenticated ? 'Launch Live Charts' : 'Login to Launch Charts'}</span>
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

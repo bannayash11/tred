@@ -8,6 +8,10 @@ import { marketDataService } from '../services/marketDataService.js';
 import { openingMomentumService } from '../services/openingMomentumService.js';
 import { maskBrokerSettings } from '../utils/security.js';
 import {
+  getPlatformBrokerPublic,
+  savePlatformBroker
+} from '../services/platformBrokerService.js';
+import {
   DURATION_MONTH_OPTIONS,
   normalizePlan,
   getPlans,
@@ -116,6 +120,7 @@ router.get('/overview', authMiddleware, subAdminOrAdmin, async (req, res) => {
       plans: getPlans(),
       settings: {
         ...maskBrokerSettings(systemSettings),
+        platformBroker: getPlatformBrokerPublic(),
         byokSalesEnabled: getByokSalesEnabled(),
         freeTrialEnabled: getFreeTrialEnabled(),
         freeTrialDays: getFreeTrialDays(),
@@ -698,21 +703,52 @@ router.get('/public-signup-settings', (_req, res) => {
 
 // ================= BROKER & ANNOUNCEMENTS =================
 
-router.post('/settings/broker', authMiddleware, adminOnly, (req, res) => {
-  const { brokerProvider, dhanConfig } = req.body;
-  if (brokerProvider) systemSettings.brokerProvider = brokerProvider;
-  if (dhanConfig) {
-    const next = { ...systemSettings.dhanConfig, ...dhanConfig };
-    // Ignore masked placeholder submissions so we don't wipe a real token
-    if (typeof next.accessToken === 'string' && next.accessToken.includes('•')) {
-      next.accessToken = systemSettings.dhanConfig.accessToken;
+router.post('/settings/broker', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { brokerProvider, dhanConfig, kotak, upstox } = req.body || {};
+
+    // Legacy Dhan fields (kept for compatibility)
+    if (brokerProvider) systemSettings.brokerProvider = brokerProvider;
+    if (dhanConfig) {
+      const next = { ...systemSettings.dhanConfig, ...dhanConfig };
+      if (typeof next.accessToken === 'string' && next.accessToken.includes('•')) {
+        next.accessToken = systemSettings.dhanConfig.accessToken;
+      }
+      systemSettings.dhanConfig = next;
     }
-    systemSettings.dhanConfig = next;
+
+    // Platform live feed: Kotak + Upstox in one save
+    let platformBroker = getPlatformBrokerPublic();
+    if (kotak || upstox) {
+      platformBroker = await savePlatformBroker({
+        kotak: kotak || {},
+        upstox: upstox || {}
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Kotak & Upstox credentials saved. Live feed will use the new keys.',
+      settings: {
+        ...maskBrokerSettings(systemSettings),
+        platformBroker
+      }
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Could not save broker credentials.'
+    });
   }
+});
+
+router.get('/settings/broker', authMiddleware, adminOnly, (req, res) => {
   res.json({
     success: true,
-    message: 'Broker settings saved',
-    settings: maskBrokerSettings(systemSettings)
+    settings: {
+      ...maskBrokerSettings(systemSettings),
+      platformBroker: getPlatformBrokerPublic()
+    }
   });
 });
 

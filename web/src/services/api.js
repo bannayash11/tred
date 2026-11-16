@@ -143,6 +143,14 @@ export const cancelMembershipApi = (data = {}) =>
 export const fetchByokStatusApi = () => api.get('/auth/byok').then((res) => res.data);
 export const updateByokCredentialsApi = (byokCredentials) =>
   api.put('/auth/byok', { byokCredentials }).then((res) => res.data);
+/** BYOK client chart: credentials for browser → broker (not platform Kotak) */
+export const fetchByokMarketClientApi = () =>
+  api.get('/auth/byok/market-client').then((res) => res.data);
+export const fetchByokSymbolMapApi = () =>
+  api.get('/auth/byok/symbol-map').then((res) => res.data);
+/** Thin CORS forward for BYOK chart GETs only */
+export const byokBrokerProxyApi = (body) =>
+  api.post('/auth/byok/broker-proxy', body).then((res) => res.data);
 
 export const loginApi = (data) => api.post('/auth/login', data).then((res) => res.data);
 export const registerSendOtpApi = (data) =>

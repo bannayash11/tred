@@ -685,7 +685,7 @@ export default function OpeningMomentumScanner({
                               if (onSelectStock) onSelectStock(stock.symbol);
                             }}
                             className="rounded-lg bg-slate-800/80 p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
-                            title="Open TradingView Chart"
+                            title="Open Chart"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
                           </button>
@@ -868,7 +868,7 @@ export default function OpeningMomentumScanner({
                               if (onSelectStock) onSelectStock(stock.symbol);
                             }}
                             className="rounded-lg bg-slate-800/80 p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
-                            title="Open TradingView Chart"
+                            title="Open Chart"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
                           </button>

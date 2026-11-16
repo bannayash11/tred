@@ -27,6 +27,7 @@ export default function Terminal(props) {
   );
   const [terminalTab, setTerminalTab] = useState('SCREENER'); // 'SCREENER' | 'MOMENTUM'
   const [feedError, setFeedError] = useState('');
+  const [feedMeta, setFeedMeta] = useState(context.feedMeta || null);
 
   useEffect(() => {
     if (context.screenerData) {
@@ -48,6 +49,7 @@ export default function Terminal(props) {
         .then((res) => {
           if (cancelled || !res.success || !res.data) return;
           setLocalScreener(res.data);
+          if (res.feed) setFeedMeta(res.feed);
           setFeedError('');
           dispatch(
             setScreenerData({
@@ -60,7 +62,12 @@ export default function Terminal(props) {
         .catch((err) => {
           console.error('Error fetching screener in Terminal:', err);
           if (!cancelled) {
-            setFeedError(err.userMessage || 'Could not refresh screener feed.');
+            const msg =
+              err.response?.data?.message ||
+              err.userMessage ||
+              'Could not refresh screener feed.';
+            setFeedError(msg);
+            if (err.response?.data?.feed) setFeedMeta(err.response.data.feed);
           }
         });
 
@@ -68,6 +75,7 @@ export default function Terminal(props) {
         .then((res) => {
           if (cancelled || !res.success || !res.data) return;
           setLocalXRay(res.data);
+          if (res.feed) setFeedMeta(res.feed);
           dispatch(setMarketXRay(res.data));
         })
         .catch((err) => {
@@ -94,8 +102,8 @@ export default function Terminal(props) {
   if (!membership.allowTerminal) {
     return (
       <MembershipLocked
-        title="Terminal locked"
-        message={membership.upgradeHint || 'Your membership does not include Terminal access.'}
+        title="Charts locked"
+        message={membership.upgradeHint || 'Your membership does not include Charts access.'}
         onOpenPricing={onOpenPricing}
       />
     );
@@ -105,11 +113,25 @@ export default function Terminal(props) {
     <div className="space-y-4 sm:space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-            Live Terminal
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+              Live Charts
+            </h1>
+            {feedMeta?.label && (
+              <span
+                className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
+                  feedMeta.mode === 'byok'
+                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                    : 'border-slate-700 bg-slate-900/80 text-slate-400'
+                }`}
+                title="Market data source"
+              >
+                {feedMeta.label}
+              </span>
+            )}
+          </div>
           <p className="text-[12px] text-slate-400 mt-1 max-w-xl leading-relaxed">
-            NSE F&O order-block scanner — tap a stock to open its chart.
+            NSE F&O setups — tap a name to open its live chart.
           </p>
         </div>
         {membership.allowMarketXRay && (
@@ -144,7 +166,7 @@ export default function Terminal(props) {
           }`}
         >
           <Layers className="h-3.5 w-3.5" />
-          <span>Order Block Screener</span>
+          <span>Order Blocks</span>
         </button>
 
         <button

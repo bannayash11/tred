@@ -46,7 +46,7 @@ export default function PricingModal({ onClose, user, onUpgradeSuccess }) {
                 <span>Special Promotional Bundle</span>
               </span>
               <h2 className="text-2xl font-extrabold text-white">
-                Institutional Pro Terminal
+                Institutional Pro Charts
               </h2>
               <p className="text-xs text-slate-400">
                 Full unrestricted access to minute-by-minute Order Block rankings and Liquidity sweep alerts.
@@ -71,11 +71,11 @@ export default function PricingModal({ onClose, user, onUpgradeSuccess }) {
             {/* Feature Checklist */}
             <div className="space-y-2.5 text-xs text-slate-300">
               {[
-                'Live 1-Minute Order Block & Liquidity Screener across 200+ F&O stocks',
+                'Live 1-Minute Order Block & Liquidity charts across 200+ F&O stocks',
                 'Automatic Institutional Demand & Supply Zone pop-up charts',
                 'Market X-Ray Macro Heatmap & Sector Flow indicator',
                 'Trader dashboard with membership & session controls',
-                'Desktop & Mobile responsive high-speed terminal',
+                'Desktop & Mobile responsive high-speed chart desk',
                 'Free Future Updates & Discord VIP Community'
               ].map((feat, idx) => (
                 <div key={idx} className="flex items-center space-x-2.5">

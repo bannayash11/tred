@@ -9,7 +9,7 @@ export const TIER_FEATURES = {
     allowTerminal: false,
     allowMarketXRay: false,
     allowFullFVG: false,
-    upgradeHint: 'Renew or upgrade a plan to restore Terminal and Market X-Ray access.'
+    upgradeHint: 'Renew or upgrade a plan to restore Charts and Market X-Ray access.'
   },
   trial: {
     key: 'trial',

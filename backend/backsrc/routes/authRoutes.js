@@ -21,7 +21,10 @@ import {
 } from '../services/membershipPlans.js';
 import {
   connectByok,
-  getByokPublicStatus
+  getByokPublicStatus,
+  classifyUserFeedMode,
+  loadUserWithByokSecrets,
+  resolveUserMarketFeed
 } from '../services/byokSessionService.js';
 import { Payment } from '../models/Payment.js';
 import { activateMembershipForUser } from '../services/membershipActivation.js';
@@ -765,6 +768,183 @@ router.get('/byok', authMiddleware, (req, res) => {
     byokSalesEnabled: getByokSalesEnabled(),
     subscriptionMode: req.user?.subscription?.mode || 'trial'
   });
+});
+
+/**
+ * Client-side chart session for BYOK members only.
+ * Frontend loads candles from the broker (or thin CORS proxy) — platform Kotak is not used.
+ */
+router.get('/byok/market-client', authMiddleware, async (req, res) => {
+  try {
+    if (classifyUserFeedMode(req.user) !== 'byok') {
+      return res.status(403).json({
+        success: false,
+        message: 'Market-client credentials are only for BYOK members. Platform plans use the server feed.'
+      });
+    }
+
+    const full = await loadUserWithByokSecrets(req.user);
+    const feed = await resolveUserMarketFeed(full || req.user);
+    if (!feed.connected || !feed.session) {
+      return res.status(403).json({
+        success: false,
+        message: feed.error || 'Connect your broker to load charts from your account.',
+        feed: feed.feed
+      });
+    }
+
+    const provider = feed.provider;
+    const session = feed.session || {};
+    const secrets = feed.secrets || {};
+
+    // Only the fields the browser needs to call that broker's market APIs
+    let client = { provider, expiresAt: session.expiresAt || null };
+    if (provider === 'upstox') {
+      client.accessToken = session.accessToken || secrets.accessToken || null;
+    } else if (provider === 'kotak') {
+      client.consumerKey = secrets.consumerKey || session.consumerKey || null;
+      client.baseUrl = session.baseUrl || null;
+      client.sid = session.sid || null;
+      client.viewToken = session.viewToken || session.token || null;
+    } else if (provider === 'groww') {
+      client.accessToken = session.accessToken || secrets.accessToken || session.token || null;
+    } else if (provider === 'angelone') {
+      client.jwtToken = session.jwtToken || session.accessToken || null;
+      client.apiKey = secrets.apiKey || session.apiKey || null;
+    }
+
+    return res.json({
+      success: true,
+      feed: feed.feed,
+      client,
+      chartMode: 'client' // frontend fetches candles
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+const BYOK_PROXY_HOSTS = new Set([
+  'api.upstox.com',
+  'assets.upstox.com',
+  'api.groww.in',
+  'apiconnect.angelone.in'
+]);
+
+/** Shared NSE EQ instrument map for client charts (CDN once, no broker quota). */
+let upstoxSymbolMapCache = null;
+let upstoxSymbolMapAt = 0;
+
+router.get('/byok/symbol-map', authMiddleware, async (req, res) => {
+  try {
+    if (classifyUserFeedMode(req.user) !== 'byok') {
+      return res.status(403).json({ success: false, message: 'BYOK only.' });
+    }
+    if (upstoxSymbolMapCache && Date.now() - upstoxSymbolMapAt < 24 * 60 * 60 * 1000) {
+      return res.json({ success: true, map: upstoxSymbolMapCache });
+    }
+    const { gunzipSync } = await import('zlib');
+    const url =
+      'https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz';
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    if (!upstream.ok) {
+      return res.status(502).json({ success: false, message: 'Could not load instrument map.' });
+    }
+    const rows = JSON.parse(gunzipSync(Buffer.from(await upstream.arrayBuffer())).toString('utf8'));
+    const map = {};
+    for (const row of rows) {
+      if (row.segment === 'NSE_EQ' && row.instrument_type === 'EQ' && row.instrument_key) {
+        const sym = String(row.trading_symbol || '')
+          .toUpperCase()
+          .replace(/-EQ$/, '');
+        if (sym && !map[sym]) map[sym] = row.instrument_key;
+      }
+      if ((row.segment === 'NSE_INDEX' || row.instrument_type === 'INDEX') && row.instrument_key) {
+        const name = String(row.name || row.trading_symbol || '').toUpperCase();
+        if (name.includes('NIFTY 50') || name === 'NIFTY') map['NIFTY 50'] = row.instrument_key;
+        if (name.includes('NIFTY BANK') || name === 'BANKNIFTY') map.BANKNIFTY = row.instrument_key;
+      }
+    }
+    upstoxSymbolMapCache = map;
+    upstoxSymbolMapAt = Date.now();
+    return res.json({ success: true, map });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Thin CORS bridge for BYOK chart calls only (no SMC / no universe warm).
+ * Used when the browser cannot call the broker API directly.
+ */
+router.post('/byok/broker-proxy', authMiddleware, async (req, res) => {
+  try {
+    if (classifyUserFeedMode(req.user) !== 'byok') {
+      return res.status(403).json({ success: false, message: 'BYOK only.' });
+    }
+    const rate = checkRateLimit(clientKey(req, 'byok-proxy'), 120, 60 * 1000);
+    if (!rate.allowed) {
+      return res.status(429).json({ success: false, message: 'Too many broker proxy requests.' });
+    }
+
+    const full = await loadUserWithByokSecrets(req.user);
+    const feed = await resolveUserMarketFeed(full || req.user);
+    if (!feed.connected) {
+      return res.status(403).json({ success: false, message: feed.error || 'Connect broker first.' });
+    }
+
+    const targetUrl = String(req.body?.url || '').trim();
+    const method = String(req.body?.method || 'GET').toUpperCase();
+    if (!/^https:\/\//i.test(targetUrl) || method !== 'GET') {
+      return res.status(400).json({ success: false, message: 'Only HTTPS GET proxy is allowed.' });
+    }
+    let parsed;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      return res.status(400).json({ success: false, message: 'Invalid URL.' });
+    }
+    if (!BYOK_PROXY_HOSTS.has(parsed.hostname)) {
+      return res.status(400).json({ success: false, message: 'Host not allowed.' });
+    }
+
+    const headers = { Accept: 'application/json' };
+    if (feed.provider === 'upstox') {
+      const tok = feed.session?.accessToken || feed.secrets?.accessToken;
+      if (tok) headers.Authorization = `Bearer ${tok}`;
+    } else if (feed.provider === 'groww') {
+      const tok = feed.session?.accessToken || feed.secrets?.accessToken;
+      if (tok) {
+        headers.Authorization = `Bearer ${tok}`;
+        headers['X-API-VERSION'] = '1.0';
+      }
+    } else if (feed.provider === 'angelone') {
+      const jwt = feed.session?.jwtToken || feed.session?.accessToken;
+      const apiKey = feed.secrets?.apiKey;
+      if (jwt) headers.Authorization = `Bearer ${jwt}`;
+      if (apiKey) headers['X-PrivateKey'] = apiKey;
+    }
+
+    const upstream = await fetch(targetUrl, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(25_000)
+    });
+    const text = await upstream.text();
+    let data = text;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      /* keep text */
+    }
+    return res.status(upstream.status).json({
+      success: upstream.ok,
+      status: upstream.status,
+      data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 /**

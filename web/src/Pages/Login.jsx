@@ -60,7 +60,7 @@ const FEATURES = [
   },
   {
     icon: BarChart3,
-    title: 'Live Terminal',
+    title: 'Live Charts',
     text: 'Real-time OB, FVG and liquidity scans.'
   }
 ];
@@ -521,7 +521,7 @@ export default function Login({ mode = 'login' }) {
                 , not retail noise.
               </h1>
               <p className={`text-sm leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-300/90'}`}>
-                Live SMC terminal — order blocks, FVGs and liquidity sweeps across NSE F&O in real time.
+                Live SMC charts — order blocks, FVGs and liquidity sweeps across NSE F&O in real time.
               </p>
             </div>
 
@@ -678,8 +678,8 @@ export default function Login({ mode = 'login' }) {
                 : isRegister
                   ? freeTrialEnabled
                     ? `Start a ${freeTrialDays}-day institutional trial. Available only for users aged 18 and above.`
-                    : 'Create your account (18+). Choose a membership plan to unlock Terminal & Market X-Ray.'
-                  : 'Access your dashboard, saved setups and live SMC terminal.'}
+                    : 'Create your account (18+). Choose a membership plan to unlock Charts & Market X-Ray.'
+                  : 'Access your dashboard, saved setups and live SMC charts.'}
             </p>
           </div>
 
@@ -907,8 +907,8 @@ export default function Login({ mode = 'login' }) {
                   {[
                     freeTrialEnabled
                       ? `${freeTrialDays}-day free institutional trial`
-                      : 'Membership plans unlock full terminal access',
-                    'Live terminal + Market X-Ray (with active plan)',
+                      : 'Membership plans unlock full Charts access',
+                    'Live Charts + Market X-Ray (with active plan)',
                     'BYOK or server feed — cancel anytime'
                   ].map((item) => (
                     <li key={item} className="flex items-start gap-2 text-[11px] text-slate-400">
@@ -942,7 +942,7 @@ export default function Login({ mode = 'login' }) {
                       ? 'Verify OTP & Create Account'
                       : isRegister
                         ? 'Continue · Verify Email'
-                        : 'Sign In to Terminal'}
+                        : 'Sign In to Charts'}
               </span>
               {!loading && <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />}
             </button>

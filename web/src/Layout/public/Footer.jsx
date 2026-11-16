@@ -64,12 +64,12 @@ export default function Footer() {
               </span>
             </div>
             <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
-              India's premier institutional Smart Money Concepts (SMC) & Liquidity terminal for 200+ NSE F&O
+              India's premier institutional Smart Money Concepts (SMC) & Liquidity charts for 200+ NSE F&O
               stocks. Built for serious intraday and swing traders.
             </p>
             <div className="flex items-center space-x-2 text-[11px] text-emerald-400 font-mono">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Institutional Screener Engine Online</span>
+              <span>Institutional Charts Engine Online</span>
             </div>
 
             {social.length > 0 ? (
@@ -97,11 +97,11 @@ export default function Footer() {
           </div>
 
           <div className="space-y-2.5">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-white">Terminal Suite</h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-white">Charts Suite</h4>
             <ul className="space-y-2">
               <li>
                 <Link to="/terminal" className="hover:text-cyan-400 transition-colors">
-                  Live Screener Board
+                  Live Charts Board
                 </Link>
               </li>
               <li>

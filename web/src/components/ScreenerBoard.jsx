@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -9,6 +9,42 @@ import {
 } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import { getMembership } from '../lib/membership';
+
+/** Extra tokens so casual queries like "nifty fifty" / "bank nifty" hit universe symbols. */
+const SYMBOL_ALIASES = {
+  'NIFTY 50': ['nifty', 'nifty 50', 'nifty50', 'nifty fifty', 'niftyfifty'],
+  BANKNIFTY: ['bank nifty', 'banknifty', 'bank-nifty', 'bnf', 'bank nifty index']
+};
+
+function normalizeQuery(q) {
+  return String(q || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function matchesStockSearch(item, rawQuery) {
+  const q = normalizeQuery(rawQuery);
+  if (!q) return true;
+  const symbol = String(item.symbol || '').toLowerCase();
+  const name = String(item.name || '').toLowerCase();
+  if (symbol.includes(q) || name.includes(q)) return true;
+  const aliases = SYMBOL_ALIASES[item.symbol] || [];
+  return aliases.some((a) => a.includes(q) || q.includes(a));
+}
+
+function formatPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return `₹${n.toLocaleString('en-IN')}`;
+}
+
+function formatChange(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return n >= 0 ? `+${n}%` : `${n}%`;
+}
 
 export default function ScreenerBoard({
   screenerData,
@@ -36,12 +72,12 @@ export default function ScreenerBoard({
 
   const bullishList = screenerData?.bullishSetups || [];
   const bearishList = screenerData?.bearishSetups || [];
+  const allStocks = screenerData?.allStocks || [];
+  const hasSearch = Boolean(normalizeQuery(searchTerm));
 
   const filterSetups = (list) => {
     return list.filter((item) => {
-      const matchSearch =
-        item.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = matchesStockSearch(item, searchTerm);
       const matchSector = selectedSector === 'ALL' || item.sector === selectedSector;
       const matchScore = item.score >= minScore;
       return matchSearch && matchSector && matchScore;
@@ -50,6 +86,24 @@ export default function ScreenerBoard({
 
   const filteredBullish = filterSetups(bullishList);
   const filteredBearish = filterSetups(bearishList);
+
+  const symbolMatches = useMemo(() => {
+    if (!hasSearch) return [];
+    return allStocks
+      .filter((item) => {
+        const matchSearch = matchesStockSearch(item, searchTerm);
+        const matchSector = selectedSector === 'ALL' || item.sector === selectedSector;
+        return matchSearch && matchSector;
+      })
+      .slice(0, 40);
+  }, [allStocks, hasSearch, searchTerm, selectedSector]);
+
+  const indexShortcuts = useMemo(() => {
+    const wanted = ['NIFTY 50', 'BANKNIFTY'];
+    return wanted
+      .map((sym) => allStocks.find((s) => s.symbol === sym))
+      .filter(Boolean);
+  }, [allStocks]);
 
   const maxVisible = membership.maxStocksVisible || 200;
   const bullishCap = Math.max(0, Math.ceil(maxVisible / 2));
@@ -61,9 +115,26 @@ export default function ScreenerBoard({
     filteredBullish.length + filteredBearish.length - displayBullish.length - displayBearish.length
   );
 
-  const sectors = ['ALL', 'Banking', 'IT', 'Auto', 'Energy', 'Metals', 'Pharma', 'Financials'];
+  const sectors = [
+    'ALL',
+    'Indices',
+    'Banking',
+    'IT',
+    'Auto',
+    'Energy',
+    'Metals',
+    'Pharma',
+    'Financials'
+  ];
 
-  const resultCount = filteredBullish.length + filteredBearish.length;
+  const setupCount = filteredBullish.length + filteredBearish.length;
+  const resultCount = hasSearch ? symbolMatches.length : setupCount;
+
+  const emptySetupMessage = hasSearch
+    ? 'No active OB setups for this search — try the symbol matches above to open a chart.'
+    : selectedSector === 'Indices'
+      ? 'No active OB setups for Indices. Use the index shortcuts or search to open a chart.'
+      : 'No active OB setups for these filters.';
 
   return (
     <div className="space-y-4">
@@ -73,7 +144,7 @@ export default function ScreenerBoard({
           <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
           <input
             type="text"
-            placeholder="Search symbol or name…"
+            placeholder="Search symbol or name… (e.g. bank nifty, nifty fifty)"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full rounded-lg bg-slate-950/80 py-2 pl-9 pr-3 text-[12px] font-medium text-slate-100 placeholder-slate-500 border border-slate-800 focus:border-cyan-500/60 focus:outline-none"
@@ -147,10 +218,108 @@ export default function ScreenerBoard({
             </label>
             <span className="text-[10px] text-slate-500">
               {resultCount} result{resultCount === 1 ? '' : 's'}
+              {hasSearch ? ' · symbols' : ' · setups'}
             </span>
           </div>
         </div>
       </div>
+
+      {/* Index quick-open when not searching */}
+      {!hasSearch && indexShortcuts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Indices
+          </span>
+          {indexShortcuts.map((stock) => {
+            const isTick = liveUpdatedSymbols.has(stock.symbol);
+            const up = Number(stock.change) >= 0;
+            return (
+              <button
+                key={stock.symbol}
+                type="button"
+                onClick={() => onSelectStock?.(stock.symbol)}
+                className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
+                  isTick
+                    ? 'border-cyan-500/50 bg-cyan-950/30'
+                    : 'border-slate-800 bg-slate-900/70 hover:border-cyan-500/40'
+                }`}
+              >
+                <span className="text-[12px] font-bold text-white">{stock.symbol}</span>
+                <span className="font-mono text-[11px] text-slate-300">
+                  {formatPrice(stock.currentPrice)}
+                </span>
+                <span
+                  className={`font-mono text-[10px] font-semibold ${
+                    up ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {formatChange(stock.change)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Universe symbol matches while searching */}
+      {hasSearch && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-0.5">
+            <h2 className="text-[12px] font-semibold text-cyan-300">
+              Symbols · {symbolMatches.length}
+            </h2>
+            <span className="text-[10px] text-slate-500">Open chart (no OB required)</span>
+          </div>
+          {symbolMatches.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-800 px-4 py-5 text-center text-[11px] text-slate-500">
+              No symbol match for “{searchTerm.trim()}”. Try nifty, bank nifty, or a ticker.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {symbolMatches.map((stock) => {
+                const isTick = liveUpdatedSymbols.has(stock.symbol);
+                const up = Number(stock.change) >= 0;
+                return (
+                  <button
+                    key={stock.symbol}
+                    type="button"
+                    onClick={() => onSelectStock?.(stock.symbol)}
+                    className={`group flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left transition-all ${
+                      isTick
+                        ? 'border-cyan-500/70 bg-cyan-950/20'
+                        : 'border-slate-800/80 bg-slate-900/70 hover:border-cyan-500/40'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-bold text-white group-hover:text-cyan-300">
+                          {stock.symbol}
+                        </span>
+                        <span className="rounded-md bg-slate-800/70 px-1.5 py-0.5 text-[9px] font-medium text-slate-400">
+                          {stock.sector}
+                        </span>
+                      </div>
+                      <span className="block truncate text-[10px] text-slate-500">{stock.name}</span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-mono text-xs font-semibold text-white">
+                        {formatPrice(stock.currentPrice)}
+                      </div>
+                      <div
+                        className={`font-mono text-[10px] font-semibold ${
+                          up ? 'text-emerald-400' : 'text-rose-400'
+                        }`}
+                      >
+                        {formatChange(stock.change)}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Boards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -170,7 +339,7 @@ export default function ScreenerBoard({
           <div className="space-y-2">
             {filteredBullish.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-[11px] text-slate-500">
-                No bullish matches for these filters.
+                {emptySetupMessage}
               </div>
             ) : (
               displayBullish.map((setup) => {
@@ -200,14 +369,14 @@ export default function ScreenerBoard({
                       <div className="text-right shrink-0">
                         <div className="flex items-center justify-end gap-1.5">
                           <span className="font-mono text-xs font-semibold text-white">
-                            ₹{setup.currentPrice.toLocaleString('en-IN')}
+                            {formatPrice(setup.currentPrice)}
                           </span>
                           <span
                             className={`font-mono text-[10px] font-semibold ${
                               setup.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
                             }`}
                           >
-                            {setup.change >= 0 ? `+${setup.change}%` : `${setup.change}%`}
+                            {formatChange(setup.change)}
                           </span>
                         </div>
                         <div className="mt-0.5 flex items-center justify-end">
@@ -274,7 +443,7 @@ export default function ScreenerBoard({
           <div className="space-y-2">
             {filteredBearish.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-[11px] text-slate-500">
-                No bearish matches for these filters.
+                {emptySetupMessage}
               </div>
             ) : (
               displayBearish.map((setup) => {
@@ -304,14 +473,14 @@ export default function ScreenerBoard({
                       <div className="text-right shrink-0">
                         <div className="flex items-center justify-end gap-1.5">
                           <span className="font-mono text-xs font-semibold text-white">
-                            ₹{setup.currentPrice.toLocaleString('en-IN')}
+                            {formatPrice(setup.currentPrice)}
                           </span>
                           <span
                             className={`font-mono text-[10px] font-semibold ${
                               setup.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
                             }`}
                           >
-                            {setup.change >= 0 ? `+${setup.change}%` : `${setup.change}%`}
+                            {formatChange(setup.change)}
                           </span>
                         </div>
                         <div className="mt-0.5 flex items-center justify-end">

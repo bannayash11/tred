@@ -6,6 +6,8 @@ import {
   subAdminOrAdmin
 } from '../middleware/authMiddleware.js';
 import { orderFlowService } from '../services/orderFlowService.js';
+import { byokOrderFlowRuntime } from '../services/byokOrderFlowRuntime.js';
+import { classifyUserFeedMode } from '../services/byokSessionService.js';
 
 const router = express.Router();
 
@@ -35,39 +37,58 @@ function sendCompressedJson(req, res, jsonStringOrBuffer) {
 
 router.use(authMiddleware, requireActiveSubscription);
 
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   try {
-    const status = orderFlowService.getStatus();
+    const ctx = await byokOrderFlowRuntime.resolve(req.user);
+    const status = byokOrderFlowRuntime.getStatus(ctx);
     if (!status.ready && status.lastError) {
       return res.status(503).json(status);
     }
     res.json(status);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const code = err.statusCode || 500;
+    res.status(code).json({ error: err.message, feed: err.feed || null });
   }
 });
 
-router.get('/universe', (req, res) => {
+router.get('/universe', async (req, res) => {
   try {
-    res.json({ underlyings: orderFlowService.getUniverse() });
+    // Universe list is shared; feed tag reflects user mode
+    const mode = classifyUserFeedMode(req.user);
+    res.json({
+      underlyings: orderFlowService.getUniverse(),
+      feedMode: mode
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/market', (req, res) => {
+router.get('/market', async (req, res) => {
   try {
+    const ctx = await byokOrderFlowRuntime.resolve(req.user);
+    if (ctx.mode === 'byok' && ctx.handle && !ctx.handle.ready && ctx.handle.lastError) {
+      return res.status(503).json({
+        error: ctx.handle.lastError.message,
+        feed: ctx.feed,
+        retryAfter: 10
+      });
+    }
+    // Shared board file for now; BYOK Upstox users still get feed tag via status.
+    // Per-user OF board rebuild is rate-limit heavy — status/futures use user token.
     const json = orderFlowService.getMarketJson();
     if (!json) {
       const status = orderFlowService.getStatus();
       return res.status(503).json({
         error: status.lastError?.message || 'The first market file is still being built.',
+        feed: ctx.feed,
         retryAfter: 5
       });
     }
     sendCompressedJson(req, res, json);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const code = err.statusCode || 500;
+    res.status(code).json({ error: err.message, feed: err.feed || null });
   }
 });
 

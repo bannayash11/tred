@@ -305,7 +305,7 @@ export default function MembershipCheckout() {
   const skipBrokerConnect = () => {
     // Paid BYOK without keys cannot use terminal — keep them on this step
     if (mustConnectBroker || needsByokBrokerConnect(authUser)) {
-      setFormError('Broker API keys are required before you can open Terminal or Order Flow.');
+      setFormError('Broker API keys are required before you can open Charts or Order Flow.');
       return;
     }
     setSuccess(true);
@@ -366,7 +366,7 @@ export default function MembershipCheckout() {
         <div className="space-y-2">
           <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">No plan selected</h2>
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-            Please choose a membership plan to continue with your checkout and terminal access.
+            Please choose a membership plan to continue with your checkout and Charts access.
           </p>
         </div>
         <Link
@@ -388,7 +388,7 @@ export default function MembershipCheckout() {
         <div className="space-y-2">
           <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Payment Successful!</h2>
           <p className="text-sm text-emerald-800 dark:text-emerald-200/90">
-            Your membership is now active. Launching trading terminal…
+            Your membership is now active. Launching Live Charts…
           </p>
         </div>
       </div>
@@ -468,7 +468,7 @@ export default function MembershipCheckout() {
                 {
                   done: false,
                   title: 'Membership activates',
-                  body: 'You can then open Terminal from your dashboard.'
+                  body: 'You can then open Charts from your dashboard.'
                 }
               ].map((step, i) => (
                 <li key={step.title} className="flex items-start gap-3">
@@ -545,7 +545,7 @@ export default function MembershipCheckout() {
             <span className="font-semibold text-emerald-700 dark:text-emerald-300">
               {plan?.name || authUser?.subscription?.plan || 'Your API'}
             </span>{' '}
-            is unlocked. Broker API keys are required — Terminal / Order Flow stay locked until you connect.
+            is unlocked. Broker API keys are required — Charts / Order Flow stay locked until you connect.
           </p>
         </div>
 
@@ -708,7 +708,7 @@ export default function MembershipCheckout() {
                 ) : (
                   <>
                     <KeyRound className="h-5 w-5" />
-                    Connect {broker.label} & Open Terminal
+                    Connect {broker.label} & Open Charts
                   </>
                 )}
               </button>
@@ -792,7 +792,7 @@ export default function MembershipCheckout() {
               {plan.name}
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              {months} months full access · Real-time Order Flow, Option Chain & Terminal
+              {months} months full access · Real-time Order Flow, Option Chain & Charts
             </p>
           </div>
 

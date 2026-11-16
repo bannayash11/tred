@@ -446,3 +446,134 @@ export async function refreshByokSession(user) {
   const { bundle } = await connectByok({ ...secrets, provider });
   return bundle;
 }
+
+/**
+ * Resolve which market feed a user should use.
+ * - server / trial → platform shared feed
+ * - byok (+ byokGranted) → user's connected broker session (no platform fallback)
+ */
+export function classifyUserFeedMode(user) {
+  const sub = user?.subscription || {};
+  const isByok = sub.mode === 'byok' || !!sub.byokGranted;
+  return isByok ? 'byok' : 'server';
+}
+
+/**
+ * Load user document with BYOK ciphers (for market feed).
+ * Accepts either a mongoose doc or plain id/object with _id.
+ */
+export async function loadUserWithByokSecrets(userOrId) {
+  const { User } = await import('../models/User.js');
+  const id =
+    typeof userOrId === 'string' || typeof userOrId === 'number'
+      ? userOrId
+      : userOrId?._id || userOrId?.id;
+  if (!id) return null;
+  try {
+    return await User.findById(id).select('+byok.secretsCipher +byok.sessionCipher -password');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @returns {Promise<{
+ *   mode: 'server'|'byok',
+ *   provider: string|null,
+ *   session: object|null,
+ *   secrets: object|null,
+ *   connected: boolean,
+ *   error: string|null,
+ *   feed: { mode: string, provider: string|null, label: string }
+ * }>}
+ */
+export async function resolveUserMarketFeed(user) {
+  const mode = classifyUserFeedMode(user);
+  if (mode !== 'byok') {
+    return {
+      mode: 'server',
+      provider: null,
+      session: null,
+      secrets: null,
+      connected: true,
+      error: null,
+      feed: { mode: 'server', provider: 'kotak', label: 'Platform · Kotak' }
+    };
+  }
+
+  const full = (user?.byok?.sessionCipher || user?.byok?.secretsCipher)
+    ? user
+    : await loadUserWithByokSecrets(user);
+
+  const status = full?.byok?.status || user?.byok?.status || 'none';
+  const provider =
+    normalizeByokProvider(full?.byok?.provider || user?.byok?.provider) || null;
+
+  if (status !== 'connected' || !provider) {
+    return {
+      mode: 'byok',
+      provider,
+      session: null,
+      secrets: null,
+      connected: false,
+      error: 'Connect your broker to load live market data on BYOK.',
+      feed: { mode: 'byok', provider, label: 'BYOK · connect broker' }
+    };
+  }
+
+  let session = readByokSession(full);
+  let secrets = readByokSecrets(full);
+
+  // Refresh if session looks expired (Upstox/Groww daily tokens)
+  const exp = session?.expiresAt ? Date.parse(session.expiresAt) : NaN;
+  if (Number.isFinite(exp) && exp < Date.now() - 60_000) {
+    try {
+      const bundle = await refreshByokSession(full);
+      if (bundle && full?.save) {
+        full.byok = bundle;
+        await full.save();
+      }
+      session = decryptObject(bundle?.sessionCipher) || session;
+      secrets = decryptObject(bundle?.secretsCipher) || secrets;
+    } catch (err) {
+      return {
+        mode: 'byok',
+        provider,
+        session: null,
+        secrets: null,
+        connected: false,
+        error: err.message || 'Broker session expired. Reconnect your broker.',
+        feed: { mode: 'byok', provider, label: `BYOK · ${provider} (reconnect)` }
+      };
+    }
+  }
+
+  if (!session) {
+    return {
+      mode: 'byok',
+      provider,
+      session: null,
+      secrets,
+      connected: false,
+      error: 'Broker session missing. Reconnect your broker.',
+      feed: { mode: 'byok', provider, label: `BYOK · ${provider} (reconnect)` }
+    };
+  }
+
+  const labels = {
+    upstox: 'BYOK · Upstox',
+    kotak: 'BYOK · Kotak Neo',
+    groww: 'BYOK · Groww',
+    angelone: 'BYOK · Angel One'
+  };
+
+  return {
+    mode: 'byok',
+    provider,
+    session,
+    secrets,
+    connected: true,
+    error: null,
+    feed: { mode: 'byok', provider, label: labels[provider] || `BYOK · ${provider}` }
+  };
+}

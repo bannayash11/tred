@@ -3,10 +3,7 @@ import { useSelector } from 'react-redux';
 import { X, TrendingUp, TrendingDown, Target, Layers, ArrowLeft } from 'lucide-react';
 import { fetchStock, getSocket } from '../services/api';
 import { getMembership } from '../lib/membership';
-import TradingViewChart, {
-  toTradingViewSymbol,
-  toTradingViewExternalSymbol
-} from './TradingViewChart';
+import { fetchByokClientStock, isByokChartUser } from '../lib/byokClientChart';
 import ManualKotakChart, {
   loadSavedOverlays,
   saveOverlays,
@@ -15,9 +12,6 @@ import ManualKotakChart, {
   sanitizeCandle,
   isNseSessionCandle
 } from './ManualKotakChart';
-
-/** Flip to true when free TradingView embed is ready to show again */
-const ENABLE_TRADINGVIEW = false;
 
 const OVERLAY_OPTIONS = [
   { key: 'orderBlocks', label: 'Order Blocks', hint: 'Demand / supply zones' },
@@ -89,8 +83,6 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const [timeframe, setTimeframe] = useState(() =>
     allowedTfs.includes('5m') ? '5m' : allowedTfs[0] || '5m'
   );
-  // Manual = Kotak LW chart (~5D + lines); TradingView temporarily disabled
-  const [chartMode, setChartMode] = useState('manual'); // 'manual' | 'tradingview'
   const [overlays, setOverlays] = useState(() => loadSavedOverlays());
   const [rangeKey, setRangeKey] = useState('5D');
 
@@ -142,14 +134,20 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
     return () => clearInterval(timer);
   }, []);
 
-  // 1. Live historical candles for selected TF + range (no fake fallback)
+  const useClientBrokerChart = isByokChartUser(authUser);
+
+  // 1. Candles: BYOK → browser/broker; Platform → server Kotak
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
     setFetchError('');
     setStockData(null);
 
-    fetchStock(symbol, { timeframe, rangeDays })
+    const load = useClientBrokerChart
+      ? fetchByokClientStock(symbol, { timeframe, rangeDays })
+      : fetchStock(symbol, { timeframe, rangeDays });
+
+    load
       .then((res) => {
         if (!isMounted) return;
         if (res.success && res.stock) {
@@ -157,7 +155,11 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
           setLivePrice(res.stock.currentPrice);
           setLiveChange(res.stock.change);
           if (!res.stock.candles?.length || res.stock.dataSource !== 'live') {
-            setFetchError('Live candle data unavailable. Waiting for Kotak Neo market feed…');
+            setFetchError(
+              useClientBrokerChart
+                ? 'No candles from your broker yet. Check token / market hours.'
+                : 'Live candle data unavailable. Waiting for platform market feed…'
+            );
           }
         } else {
           setFetchError('Unable to load live chart data.');
@@ -166,7 +168,12 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
       .catch((err) => {
         console.error('Error fetching stock details:', err);
         if (isMounted) {
-          setFetchError(err.userMessage || err.response?.data?.message || 'Failed to load live chart.');
+          setFetchError(
+            err.message ||
+              err.userMessage ||
+              err.response?.data?.message ||
+              'Failed to load live chart.'
+          );
         }
       })
       .finally(() => {
@@ -176,10 +183,11 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
     return () => {
       isMounted = false;
     };
-  }, [symbol, timeframe, rangeDays]);
+  }, [symbol, timeframe, rangeDays, useClientBrokerChart]);
 
-  // 2. Real-time Socket.io — live LTP only in NSE session; proper green/red OHLC
+  // 2. Real-time Socket.io — platform feed only (BYOK charts are client/broker)
   useEffect(() => {
+    if (useClientBrokerChart) return undefined;
     const socket = getSocket();
     socket.emit('SUBSCRIBE_STOCK', symbol);
 
@@ -206,8 +214,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
       });
       setLiveChange(newChange);
 
-      // Live candle updates only on Manual (Kotak) chart
-      if (chartMode !== 'manual') return;
+      // Live candle updates during NSE session
       const nowSec = Math.floor(Date.now() / 1000);
       if (!isNseSessionCandle(nowSec) || !seriesRef.current) return;
 
@@ -246,7 +253,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
       socket.off('MARKET_TICK', handleTick);
       socket.emit('UNSUBSCRIBE_STOCK', symbol);
     };
-  }, [symbol, timeframe, chartMode]);
+  }, [symbol, timeframe, useClientBrokerChart]);
 
 
   const currentDisplayPrice = livePrice ?? stockData?.currentPrice;
@@ -276,11 +283,9 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                 <h2 className="text-xl font-extrabold text-white">{symbol}</h2>
                 <span
                   className="rounded bg-slate-900 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-300 border border-slate-700/80"
-                  title={ENABLE_TRADINGVIEW ? 'TradingView embed symbol' : 'NSE symbol'}
+                  title="NSE symbol"
                 >
-                  {ENABLE_TRADINGVIEW
-                    ? toTradingViewSymbol(symbol) || toTradingViewExternalSymbol(symbol)
-                    : `NSE:${String(symbol || '').replace(/\s+/g, '')}`}
+                  {`NSE:${String(symbol || '').replace(/\s+/g, '')}`}
                 </span>
                 <span className="rounded bg-cyan-950 px-2 py-0.5 text-xs font-semibold text-cyan-400 border border-cyan-800/50">
                   {stockData?.sector || 'NSE F&O'}
@@ -377,34 +382,10 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
         <div className="space-y-2 border-b border-slate-800/80 px-4 sm:px-5 py-2.5 bg-slate-950/70">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
-              {ENABLE_TRADINGVIEW ? (
-                <div className="inline-flex rounded-lg border border-slate-700/80 bg-slate-900/80 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setChartMode('manual')}
-                    className={`rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                      chartMode === 'manual'
-                        ? 'bg-cyan-500 text-black shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Manual
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setChartMode('tradingview')}
-                    className={`rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                      chartMode === 'tradingview'
-                        ? 'bg-amber-500 text-black shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    TradingView
-                  </button>
-                </div>
-              ) : null}
               <span className="hidden sm:inline text-[10px] text-slate-500">
-                Kotak data · structure lines
+                {useClientBrokerChart
+                  ? 'BYOK · chart from your broker'
+                  : 'Platform feed · structure lines'}
               </span>
             </div>
             <span className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-medium text-slate-400">
@@ -469,20 +450,16 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               asPage ? 'min-h-[28rem] lg:min-h-[32rem]' : ''
             }`}
           >
-            {ENABLE_TRADINGVIEW && chartMode === 'tradingview' ? (
-              <TradingViewChart symbol={symbol} timeframe={timeframe} className="flex-1" />
-            ) : (
-              <ManualKotakChart
-                stockData={stockData}
-                timeframe={timeframe}
-                loading={loading}
-                error={fetchError}
-                seriesRef={seriesRef}
-                currentCandleRef={currentCandleRef}
-                asPage={asPage}
-                overlays={overlays}
-              />
-            )}
+            <ManualKotakChart
+              stockData={stockData}
+              timeframe={timeframe}
+              loading={loading}
+              error={fetchError}
+              seriesRef={seriesRef}
+              currentCandleRef={currentCandleRef}
+              asPage={asPage}
+              overlays={overlays}
+            />
           </div>
 
           <div className="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-slate-800/70 bg-[#0a0f18] px-3.5 py-3.5 overflow-y-auto space-y-3">
@@ -493,8 +470,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               </p>
             </div>
 
-            {(!ENABLE_TRADINGVIEW || chartMode === 'manual') && (
-              <div className="rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2.5 space-y-2.5">
+            <div className="rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2.5 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] font-semibold text-slate-200">Show on chart</div>
@@ -540,7 +516,6 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                   })}
                 </div>
               </div>
-            )}
 
             {nearestLevel && (
               <div className="rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2.5 space-y-2">

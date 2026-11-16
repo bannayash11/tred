@@ -1,14 +1,24 @@
 /**
  * Shared chart URL helpers — use everywhere so M&M / NIFTY 50 never break the path.
- * TradingView free embeds use BSE tickers (see toTradingViewSymbol) so NSE never
- * fails open to AAPL.
  */
 
+/** Canonical map so /chart/NIFTY and NIFTY50 resolve to universe key NIFTY 50. */
+const CHART_SYMBOL_ALIASES = {
+  NIFTY: 'NIFTY 50',
+  NIFTY50: 'NIFTY 50',
+  'NIFTY FIFTY': 'NIFTY 50',
+  'BANK NIFTY': 'BANKNIFTY',
+  BANKNIFTY: 'BANKNIFTY',
+  BNF: 'BANKNIFTY'
+};
+
 export function normalizeChartSymbol(symbol) {
-  return String(symbol || '')
+  const code = String(symbol || '')
     .trim()
     .toUpperCase()
     .replace(/\s+/g, ' ');
+  if (!code) return '';
+  return CHART_SYMBOL_ALIASES[code] || code;
 }
 
 /** Decode a :symbol route param (RR usually decodes once; tolerate raw / double-encoded). */

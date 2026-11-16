@@ -68,7 +68,7 @@ function filterNseSessionCandles(candles, timeframe = '5m') {
 }
 
 // Comprehensive Indian NSE F&O Stock Universe with REAL base price & sector mapping
-const FNO_UNIVERSE = [
+export const FNO_UNIVERSE = [
   // Indices
   { symbol: 'NIFTY 50', name: 'Nifty 50 Index', sector: 'Indices', basePrice: 24270.0 },
   { symbol: 'BANKNIFTY', name: 'Bank Nifty Index', sector: 'Indices', basePrice: 58950.0 },
@@ -742,11 +742,32 @@ export class MarketDataService {
   }
 
   /**
+   * Resolve chart/screener symbol aliases (NIFTY → NIFTY 50, etc.).
+   */
+  _resolveStock(symbol) {
+    const raw = String(symbol || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, ' ');
+    if (!raw) return null;
+
+    const aliases = {
+      NIFTY: 'NIFTY 50',
+      NIFTY50: 'NIFTY 50',
+      'NIFTY FIFTY': 'NIFTY 50',
+      'BANK NIFTY': 'BANKNIFTY',
+      BNF: 'BANKNIFTY'
+    };
+    const key = aliases[raw] || raw;
+    return this.stocks.get(key) || this.stocks.get(raw) || null;
+  }
+
+  /**
    * Get individual stock detail including LIVE candles for chart rendering.
    * Fake/generated candles are never returned for charts.
    */
   async getStockDetails(symbol, options = {}) {
-    const stock = this.stocks.get(String(symbol || '').toUpperCase());
+    const stock = this._resolveStock(symbol);
     if (!stock) return null;
 
     const timeframe = options.timeframe || '5m';

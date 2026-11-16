@@ -54,7 +54,7 @@ export default function Contact() {
           Get in Touch with our Trading Desk
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Have questions about SMC screener algorithms, broker API hookups, or institutional subscriptions?
+          Have questions about SMC chart algorithms, broker API hookups, or institutional subscriptions?
         </p>
       </div>
 

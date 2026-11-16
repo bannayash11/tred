@@ -1102,7 +1102,7 @@ export const cancelMembership = async (req, res) => {
 
       return res.json({
         success: true,
-        message: 'Membership cancelled. Terminal access is now locked until you renew.',
+        message: 'Membership cancelled. Charts access is now locked until you renew.',
         user: sanitizeUser(user)
       });
     }
