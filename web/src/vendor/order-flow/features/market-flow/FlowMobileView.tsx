@@ -57,7 +57,7 @@ import { chartPath } from '../../../../lib/chartRoutes';
 import { useBox } from './useBox';
 import type { Underlying } from '@/lib/underlyings';
 
-export type MobileTab = 'bullish' | 'bearish' | 'chart' | 'sectors';
+export type MobileTab = 'bullish' | 'bearish' | 'rangebound' | 'chart' | 'sectors';
 type ViewMode = 'list' | 'grid';
 
 interface FlowMobileViewProps {
@@ -73,6 +73,9 @@ interface FlowMobileViewProps {
   futuresTotal: number;
   onRescan: () => void;
   settings: Pick<FlowSettings, 'named' | 'lines'>;
+  /** Portrait/landscape board switcher from MarketFlowPage */
+  layoutMode?: 'auto' | 'mobile' | 'desktop';
+  onLayoutModeChange?: (mode: 'auto' | 'mobile' | 'desktop') => void;
 }
 
 const UNIVERSES: Array<{ value: FlowUniverse; label: string }> = [
@@ -92,6 +95,8 @@ export function FlowMobileView({
   futuresTotal,
   onRescan,
   settings,
+  layoutMode = 'auto',
+  onLayoutModeChange
 }: FlowMobileViewProps) {
   const [activeTab, setActiveTab] = useState<MobileTab>('bullish');
   const [searchQuery, setSearchQuery] = useState('');
@@ -99,6 +104,11 @@ export function FlowMobileView({
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
+
+  // Build-up filters are side-specific — reset when switching Bullish/Bearish/Flat.
+  useEffect(() => {
+    setBuildFilter('ALL');
+  }, [activeTab]);
 
   const updating = flow ? futuresRead < futuresTotal || flow.provisional : loading;
 
@@ -108,11 +118,12 @@ export function FlowMobileView({
     return flow.stocks.find(s => s.symbol === selectedSymbol) ?? null;
   }, [selectedSymbol, flow]);
 
-  // Filtered stocks for Bullish / Bearish tabs
+  // Bullish / Bearish / Rangebound lists (same market flow as desktop board)
   const currentSideStocks = useMemo(() => {
     if (!flow) return [];
     if (activeTab === 'bullish') return flow.bullish;
     if (activeTab === 'bearish') return flow.bearish;
+    if (activeTab === 'rangebound') return flow.rangebound;
     return [];
   }, [flow, activeTab]);
 
@@ -133,7 +144,7 @@ export function FlowMobileView({
       list = list.filter(s => s.sector === selectedSector || s.sectorLabel === selectedSector);
     }
 
-    if (buildFilter !== 'ALL') {
+    if (buildFilter !== 'ALL' && activeTab !== 'rangebound') {
       if (buildFilter === 'TOP10') {
         list = list.slice(0, 10);
       } else if (buildFilter === 'LONG_BUILD') {
@@ -148,7 +159,21 @@ export function FlowMobileView({
     }
 
     return list;
-  }, [currentSideStocks, searchQuery, selectedSector, buildFilter]);
+  }, [currentSideStocks, searchQuery, selectedSector, buildFilter, activeTab]);
+
+  const openSector = (secId: string) => {
+    if (!flow) return;
+    setSelectedSector(secId);
+    setBuildFilter('ALL');
+    setSearchQuery('');
+    const match = (s: FlowStock) => s.sector === secId || s.sectorLabel === secId;
+    const bull = flow.bullish.filter(match).length;
+    const bear = flow.bearish.filter(match).length;
+    const flat = flow.rangebound.filter(match).length;
+    if (bull >= bear && bull >= flat) setActiveTab('bullish');
+    else if (bear >= flat) setActiveTab('bearish');
+    else setActiveTab('rangebound');
+  };
 
   // Market Breadth counts
   const bullishCount = flow?.bullish.length ?? 0;
@@ -179,69 +204,97 @@ export function FlowMobileView({
   };
 
   return (
-    <div className="mf-mobile-root min-h-screen bg-[#070b14] text-slate-100 flex flex-col font-sans selection:bg-emerald-500/20 pb-20">
+    <div className="mf-mobile-root min-h-[100dvh] max-w-[100vw] overflow-x-hidden bg-[#070b14] text-slate-100 flex flex-col font-sans selection:bg-emerald-500/20 pb-28">
       {/* ── App Header ────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 bg-[#0a0f1d]/95 backdrop-blur-md border-b border-slate-800/80 px-3 pt-2 pb-2.5">
-        <div className="flex items-center justify-between gap-2">
+      <header className="sticky top-0 z-30 bg-[#0a0f1d]/95 backdrop-blur-md border-b border-slate-800/80 px-2.5 pt-2 pb-2">
+        <div className="flex items-center gap-1.5 min-w-0">
           {/* Back button */}
           <Link
             to="/terminal"
-            className="w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white active:scale-95 transition-all"
+            className="w-8 h-8 shrink-0 rounded-full bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white active:scale-95 transition-all"
             aria-label="Back to Charts"
           >
             <ChevronLeft size={18} />
           </Link>
 
           {/* Title & Live Status */}
-          <div className="flex-1 min-w-0 flex items-center gap-2">
-            <h1 className="text-base font-bold text-white tracking-tight leading-none truncate">
+          <div className="min-w-0 flex-1 flex items-center gap-1.5 overflow-hidden">
+            <h1 className="text-sm font-bold text-white tracking-tight leading-none truncate">
               Order Flow
             </h1>
             {updating ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+              <span className="inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                Updating
+                {futuresTotal > 0 ? `${futuresRead}/${futuresTotal}` : 'Upd'}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <span className="inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 Live
               </span>
             )}
           </div>
 
-          {/* Universe Capsule */}
-          <div className="flex items-center bg-slate-800/90 rounded-full p-0.5 border border-slate-700/70 text-[11px] font-medium">
-            {UNIVERSES.map(u => (
-              <button
-                key={u.value}
-                type="button"
-                onClick={() => setScope(u.value)}
-                className={`px-2.5 py-1 rounded-full transition-all leading-none ${
-                  scope === u.value
-                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {u.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-1 shrink-0 overflow-x-auto no-scrollbar max-w-[62%]">
+            {onLayoutModeChange ? (
+              <div className="mf-view-toggle" role="group" aria-label="Order Flow layout">
+                <button
+                  type="button"
+                  className={layoutMode === 'mobile' ? 'is-on' : undefined}
+                  onClick={() => onLayoutModeChange('mobile')}
+                >
+                  Mob
+                </button>
+                <button
+                  type="button"
+                  className={layoutMode === 'auto' ? 'is-on' : undefined}
+                  onClick={() => onLayoutModeChange('auto')}
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  className={layoutMode === 'desktop' ? 'is-on' : undefined}
+                  onClick={() => onLayoutModeChange('desktop')}
+                >
+                  Desk
+                </button>
+              </div>
+            ) : null}
+
+            {/* Universe Capsule */}
+            <div className="flex items-center bg-slate-800/90 rounded-full p-0.5 border border-slate-700/70 text-[10px] font-medium shrink-0">
+              {UNIVERSES.map(u => (
+                <button
+                  key={u.value}
+                  type="button"
+                  onClick={() => setScope(u.value)}
+                  className={`px-2 py-1 rounded-full transition-all leading-none whitespace-nowrap ${
+                    scope === u.value
+                      ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {u.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Refresh Action */}
+            <button
+              type="button"
+              onClick={onRescan}
+              disabled={loading}
+              className="w-8 h-8 shrink-0 rounded-full bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white active:scale-95 transition-all disabled:opacity-50"
+              title="Refresh Order Flow"
+              aria-label="Refresh Order Flow"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin text-emerald-400' : ''} />
+            </button>
+
+            {/* Theme Toggle */}
+            <ThemeToggle onChange={t => applyTheme(t)} size="sm" />
           </div>
-
-          {/* Refresh Action */}
-          <button
-            type="button"
-            onClick={onRescan}
-            disabled={loading}
-            className="w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white active:scale-95 transition-all disabled:opacity-50"
-            title="Refresh Order Flow"
-            aria-label="Refresh Order Flow"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin text-emerald-400' : ''} />
-          </button>
-
-          {/* Theme Toggle */}
-          <ThemeToggle onChange={t => applyTheme(t)} size="sm" />
         </div>
       </header>
 
@@ -297,14 +350,22 @@ export function FlowMobileView({
               </div>
             </button>
 
-            <div className="p-1.5 rounded-xl border bg-slate-800/30 border-slate-700/30 text-slate-400">
+            <button
+              type="button"
+              onClick={() => setActiveTab('rangebound')}
+              className={`p-1.5 rounded-xl border transition-all ${
+                activeTab === 'rangebound'
+                  ? 'bg-slate-500/20 border-slate-400/40 text-slate-200'
+                  : 'bg-slate-800/50 border-slate-700/40 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
               <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center justify-center gap-1">
                 <Minus size={11} /> Rangebound
               </div>
-              <div className="text-base font-extrabold font-mono text-slate-300 mt-0.5">
+              <div className="text-base font-extrabold font-mono text-slate-200 mt-0.5">
                 {flatCount}
               </div>
-            </div>
+            </button>
 
             <button
               type="button"
@@ -351,8 +412,8 @@ export function FlowMobileView({
           </div>
         )}
 
-        {/* ── TAB 1 & 2: Bullish & Bearish Lists ───────────────── */}
-        {(activeTab === 'bullish' || activeTab === 'bearish') && flow && (
+        {/* ── TAB 1–3: Bullish / Bearish / Rangebound Lists ────── */}
+        {(activeTab === 'bullish' || activeTab === 'bearish' || activeTab === 'rangebound') && flow && (
           <div className="space-y-2.5">
             {/* Search & Filter Toolbar */}
             <div className="flex items-center gap-2">
@@ -361,7 +422,9 @@ export function FlowMobileView({
                 <Search size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder={`Search ${activeTab === 'bullish' ? 'Bullish' : 'Bearish'} stocks...`}
+                  placeholder={`Search ${
+                    activeTab === 'bullish' ? 'Bullish' : activeTab === 'bearish' ? 'Bearish' : 'Rangebound'
+                  } stocks...`}
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   className="w-full bg-[#0f172a] border border-slate-800 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/60 transition-all"
@@ -415,14 +478,16 @@ export function FlowMobileView({
                   buildFilter === 'ALL'
                     ? activeTab === 'bullish'
                       ? 'bg-emerald-500 text-slate-950 font-bold'
-                      : 'bg-rose-500 text-white font-bold'
+                      : activeTab === 'bearish'
+                        ? 'bg-rose-500 text-white font-bold'
+                        : 'bg-slate-400 text-slate-950 font-bold'
                     : 'bg-slate-800/80 text-slate-300 border border-slate-700/50 hover:bg-slate-700'
                 }`}
               >
                 All ({currentSideStocks.length})
               </button>
 
-              {activeTab === 'bullish' ? (
+              {activeTab === 'bullish' && (
                 <>
                   <button
                     type="button"
@@ -449,7 +514,9 @@ export function FlowMobileView({
                     Short Covering
                   </button>
                 </>
-              ) : (
+              )}
+
+              {activeTab === 'bearish' && (
                 <>
                   <button
                     type="button"
@@ -478,17 +545,19 @@ export function FlowMobileView({
                 </>
               )}
 
-              <button
-                type="button"
-                onClick={() => setBuildFilter('TOP10')}
-                className={`px-3 py-1 rounded-full whitespace-nowrap transition-all ${
-                  buildFilter === 'TOP10'
-                    ? 'bg-cyan-500 text-slate-950 font-bold'
-                    : 'bg-slate-800/80 text-slate-300 border border-slate-700/50 hover:bg-slate-700'
-                }`}
-              >
-                Top 10 Movers
-              </button>
+              {activeTab !== 'rangebound' && (
+                <button
+                  type="button"
+                  onClick={() => setBuildFilter('TOP10')}
+                  className={`px-3 py-1 rounded-full whitespace-nowrap transition-all ${
+                    buildFilter === 'TOP10'
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-800/80 text-slate-300 border border-slate-700/50 hover:bg-slate-700'
+                  }`}
+                >
+                  Top 10 Movers
+                </button>
+              )}
 
               {selectedSector && (
                 <button
@@ -503,7 +572,11 @@ export function FlowMobileView({
             </div>
 
             {/* Featured Leaders Carousel (Strongest readings) */}
-            {!searchQuery && !selectedSector && buildFilter === 'ALL' && flow.featured[activeTab].length > 0 && (
+            {!searchQuery &&
+              !selectedSector &&
+              buildFilter === 'ALL' &&
+              (activeTab === 'bullish' || activeTab === 'bearish') &&
+              flow.featured[activeTab].length > 0 && (
               <div className="py-1">
                 <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
                   <Zap size={12} className={activeTab === 'bullish' ? 'text-emerald-400' : 'text-rose-400'} />
@@ -526,15 +599,27 @@ export function FlowMobileView({
             <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 pt-1">
               <span>
                 Showing <b className="text-white font-mono">{filteredStocks.length}</b>{' '}
-                {activeTab === 'bullish' ? 'bullish' : 'bearish'} underlyings
+                {activeTab === 'bullish' ? 'bullish' : activeTab === 'bearish' ? 'bearish' : 'rangebound'}{' '}
+                underlyings
+                {flow.stocks.length > 0 && (
+                  <span className="text-slate-500"> · {flow.stocks.length} total</span>
+                )}
               </span>
               <span>Sorted by Move Size</span>
             </div>
 
+            {updating && futuresTotal > 0 && futuresRead < futuresTotal && (
+              <div className="px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-300">
+                Futures still loading ({futuresRead}/{futuresTotal}). Lists fill in as each underlying arrives.
+              </div>
+            )}
+
             {/* Stock List / Grid Content */}
             {filteredStocks.length === 0 ? (
               <div className="p-8 text-center bg-[#0f172a]/50 rounded-2xl border border-slate-800/60 text-slate-400 text-sm">
-                No stocks match your filter criteria.
+                {updating
+                  ? 'Waiting for futures… pull refresh if this stays empty.'
+                  : 'No stocks match your filter criteria.'}
               </div>
             ) : viewMode === 'list' ? (
               <div className="space-y-1.5">
@@ -542,7 +627,7 @@ export function FlowMobileView({
                   <StockRowItem
                     key={stock.symbol}
                     stock={stock}
-                    side={activeTab}
+                    side={activeTab === 'rangebound' ? 'rangebound' : activeTab}
                     onClick={() => setSelectedSymbol(stock.symbol)}
                   />
                 ))}
@@ -553,7 +638,7 @@ export function FlowMobileView({
                   <StockGridCard
                     key={stock.symbol}
                     stock={stock}
-                    side={activeTab}
+                    side={activeTab === 'rangebound' ? 'rangebound' : activeTab}
                     onClick={() => setSelectedSymbol(stock.symbol)}
                   />
                 ))}
@@ -573,13 +658,7 @@ export function FlowMobileView({
 
         {/* ── TAB 4: Sectors Rotation ──────────────────────────── */}
         {activeTab === 'sectors' && flow && (
-          <MobileSectorsTab
-            flow={flow}
-            onSelectSector={secId => {
-              setSelectedSector(secId);
-              setActiveTab('bullish');
-            }}
-          />
+          <MobileSectorsTab flow={flow} onSelectSector={openSector} />
         )}
       </main>
 
@@ -695,7 +774,7 @@ const StockRowItem = memo(function StockRowItem({
   onClick,
 }: {
   stock: FlowStock;
-  side: 'bullish' | 'bearish';
+  side: 'bullish' | 'bearish' | 'rangebound';
   onClick: () => void;
 }) {
   const isUp = (stock.changePct ?? 0) >= 0;
@@ -777,7 +856,7 @@ const StockGridCard = memo(function StockGridCard({
   onClick,
 }: {
   stock: FlowStock;
-  side: 'bullish' | 'bearish';
+  side: 'bullish' | 'bearish' | 'rangebound';
   onClick: () => void;
 }) {
   const isUp = (stock.changePct ?? 0) >= 0;
@@ -992,12 +1071,14 @@ function FlowMobileDetailSheet({
                   </h2>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      isUp
+                      stock.side === 'bullish'
                         ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                        : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                        : stock.side === 'bearish'
+                          ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                          : 'bg-slate-500/20 text-slate-300 border-slate-500/30'
                     }`}
                   >
-                    {stock.side === 'bullish' ? 'BULLISH' : 'BEARISH'}
+                    {stock.side === 'bullish' ? 'BULLISH' : stock.side === 'bearish' ? 'BEARISH' : 'FLAT'}
                   </span>
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
@@ -1083,6 +1164,24 @@ function FlowMobileDetailSheet({
                     ({compactUnits(stock.fut.oi)})
                   </small>
                 )}
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-[#0f172a] border border-slate-800">
+              <div className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+                PCR
+              </div>
+              <div className="text-sm font-bold font-mono text-white mt-0.5">
+                {stock.options.pcr != null ? stock.options.pcr.toFixed(2) : '—'}
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-[#0f172a] border border-slate-800">
+              <div className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+                Expiry Levels
+              </div>
+              <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
+                {expiryDisplay(stock.expiry).label}
               </div>
             </div>
 
