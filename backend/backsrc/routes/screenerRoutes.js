@@ -2,6 +2,10 @@ import express from 'express';
 import { authMiddleware, requireActiveSubscription } from '../middleware/authMiddleware.js';
 import { openingMomentumService } from '../services/openingMomentumService.js';
 import { byokMarketRuntime } from '../services/byokMarketRuntime.js';
+import {
+  applyScreenerPlanLimits,
+  resolveUserEntitlements
+} from '../services/membershipPlans.js';
 
 const router = express.Router();
 
@@ -16,11 +20,48 @@ function sendByokError(res, err) {
   });
 }
 
+function entitlementsOr403(req, res, { needTerminal = false, needXRay = false } = {}) {
+  if (req.user?.role === 'admin' || req.user?.role === 'subadmin') {
+    return {
+      maxStocks: 9999,
+      timeframesAllowed: ['1m', '3m', '5m', '15m', '1h', '1d'],
+      allowTerminal: true,
+      allowMarketXRay: true
+    };
+  }
+  const entitlements = resolveUserEntitlements(req.user);
+  if (needTerminal && !entitlements.allowTerminal) {
+    res.status(403).json({
+      success: false,
+      message: 'Your plan does not include Terminal access.'
+    });
+    return null;
+  }
+  if (needXRay && !entitlements.allowMarketXRay) {
+    res.status(403).json({
+      success: false,
+      message: 'Your plan does not include Market X-Ray.'
+    });
+    return null;
+  }
+  return entitlements;
+}
+
 // Get live ranked Order Block screener setups
 router.get('/live', async (req, res) => {
   try {
+    const entitlements = entitlementsOr403(req, res, { needTerminal: true });
+    if (!entitlements) return;
     const { data, feed } = await byokMarketRuntime.getScreenerForUser(req.user);
-    res.json({ success: true, data, feed });
+    res.json({
+      success: true,
+      data: applyScreenerPlanLimits(data, entitlements),
+      feed,
+      entitlements: {
+        maxStocks: entitlements.maxStocks,
+        timeframesAllowed: entitlements.timeframesAllowed
+      }
+    });
   } catch (err) {
     sendByokError(res, err);
   }
@@ -29,6 +70,8 @@ router.get('/live', async (req, res) => {
 // Get Market X-Ray macro statistics
 router.get('/market-xray', async (req, res) => {
   try {
+    const entitlements = entitlementsOr403(req, res, { needXRay: true });
+    if (!entitlements) return;
     const { data, feed } = await byokMarketRuntime.getMarketXRayForUser(req.user);
     res.json({ success: true, data, feed });
   } catch (err) {
@@ -96,6 +139,9 @@ router.get('/opening-momentum/history/:date', async (req, res) => {
 // Platform / server-plan only. BYOK charts load from the browser → broker.
 router.get('/stock/:symbol', async (req, res) => {
   try {
+    const entitlements = entitlementsOr403(req, res, { needTerminal: true });
+    if (!entitlements) return;
+
     const { classifyUserFeedMode } = await import('../services/byokSessionService.js');
     if (classifyUserFeedMode(req.user) === 'byok') {
       return res.status(400).json({
@@ -107,6 +153,13 @@ router.get('/stock/:symbol', async (req, res) => {
     }
     const { symbol } = req.params;
     const timeframe = String(req.query.tf || req.query.timeframe || '5m').toLowerCase();
+    if (!entitlements.timeframesAllowed.includes(timeframe)) {
+      return res.status(403).json({
+        success: false,
+        message: `Timeframe ${timeframe} is not included in your plan.`,
+        timeframesAllowed: entitlements.timeframesAllowed
+      });
+    }
     const rangeDays = Number(req.query.range || req.query.rangeDays || 30);
     const stock = await byokMarketRuntime.getStockDetailsForUser(req.user, symbol, {
       timeframe,

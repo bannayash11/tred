@@ -179,19 +179,13 @@ export default function RazorpayCheckout({
               throw new Error(toErrorText(verifyRes?.message, 'Payment verification failed.'));
             }
 
-            // Payment verified = success. Membership may activate now or after BYOK connect.
-            if (verifyRes.paymentVerified || verifyRes.membershipActivated) {
-              const activated = !!verifyRes.membershipActivated;
+            if (verifyRes.membershipActivated) {
               setStatus('success');
-              setMessage(
-                activated
-                  ? 'Payment confirmed. Membership activated!'
-                  : 'Payment confirmed! Next step: connect your broker.'
-              );
+              setMessage('Payment confirmed. Membership activated!');
               onSuccess?.({
                 payment: verifyRes.payment,
                 user: verifyRes.user,
-                membershipActivated: activated,
+                membershipActivated: true,
                 paymentVerified: true,
                 message: verifyRes.message
               });
@@ -199,7 +193,12 @@ export default function RazorpayCheckout({
             }
 
             throw new Error(
-              toErrorText(verifyRes.message, 'Payment could not be confirmed. Please try again.')
+              toErrorText(
+                verifyRes.message,
+                verifyRes.paymentVerified
+                  ? 'Payment received but membership was not activated. Contact support with your Order ID.'
+                  : 'Payment could not be confirmed. Please try again.'
+              )
             );
           } catch (err) {
             const msg = toErrorText(

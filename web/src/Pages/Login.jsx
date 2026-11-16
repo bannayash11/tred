@@ -21,7 +21,6 @@ import {
   Moon
 } from 'lucide-react';
 import {
-  fetchPublicSignupSettings,
   forgotPasswordApi,
   loginApi,
   registerApi,
@@ -105,36 +104,7 @@ export default function Login({ mode = 'login' }) {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [confirmAge18, setConfirmAge18] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
-  const [freeTrialEnabled, setFreeTrialEnabled] = useState(false);
-  const [freeTrialDays, setFreeTrialDays] = useState(14);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchPublicSignupSettings()
-      .then((res) => {
-        if (cancelled || !res?.success) return;
-        setFreeTrialEnabled(!!res.freeTrialEnabled);
-        if (res.freeTrialDays) setFreeTrialDays(Number(res.freeTrialDays) || 14);
-      })
-      .catch(() => {
-        /* keep default OFF */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const stats = useMemo(() => {
-    if (freeTrialEnabled) {
-      return [
-        BASE_STATS[0],
-        BASE_STATS[1],
-        { value: `${freeTrialDays}d`, label: 'Free Trial' },
-        BASE_STATS[2]
-      ];
-    }
-    return BASE_STATS;
-  }, [freeTrialEnabled, freeTrialDays]);
+  const stats = BASE_STATS;
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -676,9 +646,7 @@ export default function Login({ mode = 'login' }) {
               {requiresSignupOtp
                 ? 'Enter the 6-digit OTP emailed to you to finish signup.'
                 : isRegister
-                  ? freeTrialEnabled
-                    ? `Start a ${freeTrialDays}-day institutional trial. Available only for users aged 18 and above.`
-                    : 'Create your account (18+). Choose a membership plan to unlock Charts & Market X-Ray.'
+                  ? 'Create your account (18+). Choose a membership plan to unlock Charts & Market X-Ray.'
                   : 'Access your dashboard, saved setups and live SMC charts.'}
             </p>
           </div>
@@ -905,9 +873,7 @@ export default function Login({ mode = 'login' }) {
 
                 <ul className="space-y-1.5 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3.5 py-3">
                   {[
-                    freeTrialEnabled
-                      ? `${freeTrialDays}-day free institutional trial`
-                      : 'Membership plans unlock full Charts access',
+                    'Membership plans unlock full Charts access',
                     'Live Charts + Market X-Ray (with active plan)',
                     'BYOK or server feed — cancel anytime'
                   ].map((item) => (
@@ -955,7 +921,7 @@ export default function Login({ mode = 'login' }) {
               onClick={switchMode}
               className="font-bold text-cyan-400 hover:text-cyan-300 hover:underline ml-1"
             >
-              {isRegister ? 'Sign In' : freeTrialEnabled ? 'Sign Up Free' : 'Create Account'}
+              {isRegister ? 'Sign In' : 'Create Account'}
             </button>
           </div>
         </div>

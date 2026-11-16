@@ -5,13 +5,6 @@ const router = express.Router();
 
 // Tier Feature Rules Configuration (plans may override; this is a fallback catalog)
 let tierFeatureRules = {
-  trial: {
-    name: '14-Day Free Trial',
-    maxStocksVisible: 8,
-    timeframesAllowed: ['15m'],
-    allowMarketXRay: true,
-    allowFullFVG: false
-  },
   starter: {
     name: 'Monthly Starter',
     maxStocksVisible: 30,

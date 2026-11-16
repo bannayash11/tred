@@ -56,7 +56,7 @@ const DEFAULT_SEO_PAGES = [
     pageName: 'Pricing & Plans',
     metaTitle: 'Pricing & Membership Plans | Tradrift',
     metaDescription:
-      'Compare Tradrift trial, starter and pro membership plans for live SMC Charts access.',
+      'Compare Tradrift membership plans for live SMC Charts access.',
     metaKeywords: 'tradrift pricing, trading charts plans, SMC membership',
     ogTitle: 'Membership Plans | Tradrift',
     ogDescription: 'Choose the right plan for institutional SMC analytics.',
@@ -171,7 +171,7 @@ const DEFAULT_SEO_PAGES = [
     path: '/faq',
     pageName: 'FAQ',
     metaTitle: 'FAQ — Frequently Asked Questions | Tradrift',
-    metaDescription: 'Answers about Tradrift accounts, trial, SMC Charts, and platform policies.',
+    metaDescription: 'Answers about Tradrift accounts, membership, SMC Charts, and platform policies.',
     metaKeywords: 'tradrift faq, trading charts help, SMC questions',
     ogTitle: 'FAQ | Tradrift',
     ogDescription: 'Common questions about Tradrift membership and features.',

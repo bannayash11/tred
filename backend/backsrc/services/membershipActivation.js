@@ -20,7 +20,7 @@ export function sanitizeUser(user) {
           status: user.subscription.status,
           plan: user.subscription.plan,
           planId: user.subscription.planId || null,
-          mode: user.subscription.mode || 'trial',
+          mode: user.subscription.mode || 'server',
           byokGranted: !!user.subscription.byokGranted,
           expiresAt: user.subscription.expiresAt
         }
@@ -88,15 +88,6 @@ export async function activateMembershipForUser({
   // BYOK membership can activate without broker keys — user connects demat/API after payment.
 
   const days = Number(plan.durationDays) || (Number(plan.durationMonths) || 1) * 30;
-  const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-  const subscription = {
-    status: 'active',
-    plan: plan.name,
-    planId: plan.id,
-    mode,
-    byokGranted: mode === 'byok' ? true : !!existingUser?.subscription?.byokGranted,
-    expiresAt
-  };
 
   if (isDbReady()) {
     const user = await User.findById(userId).select('+byok.secretsCipher +byok.sessionCipher');
@@ -106,10 +97,17 @@ export async function activateMembershipForUser({
       throw err;
     }
 
-    // Refresh byokGranted from live user if existingUser was stale
-    if (mode !== 'byok') {
-      subscription.byokGranted = !!user.subscription?.byokGranted;
-    }
+    const { stackSubscriptionExpiry } = await import('./membershipPlans.js');
+    const expiresAt = stackSubscriptionExpiry(user.subscription?.expiresAt, days);
+    const subscription = {
+      status: 'active',
+      plan: plan.name,
+      planId: plan.id,
+      mode,
+      // Server plans never inherit BYOK feed flags
+      byokGranted: mode === 'byok',
+      expiresAt
+    };
 
     user.subscription = subscription;
     if (bundle) {
@@ -127,6 +125,16 @@ export async function activateMembershipForUser({
   if (allowMemoryAuth()) {
     const mem = memoryUsers.get(String(userId));
     if (mem) {
+      const { stackSubscriptionExpiry } = await import('./membershipPlans.js');
+      const expiresAt = stackSubscriptionExpiry(mem.subscription?.expiresAt, days);
+      const subscription = {
+        status: 'active',
+        plan: plan.name,
+        planId: plan.id,
+        mode,
+        byokGranted: mode === 'byok',
+        expiresAt
+      };
       mem.subscription = subscription;
       if (bundle) {
         mem.byok = bundle;

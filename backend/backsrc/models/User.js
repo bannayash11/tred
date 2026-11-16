@@ -59,8 +59,8 @@ const userSchema = new mongoose.Schema({
   subscription: {
     status: {
       type: String,
+      // `trial` kept only for legacy DB rows — new signups are always expired until paid
       enum: ['active', 'expired', 'trial'],
-      // Default OFF — no free trial unless admin enables + register applies it
       default: 'expired'
     },
     plan: {
@@ -71,7 +71,7 @@ const userSchema = new mongoose.Schema({
       type: String,
       default: null
     },
-    /** server = shared Tradrift feed | byok = user broker keys | trial */
+    /** server = shared Tradrift feed | byok = user broker keys */
     mode: {
       type: String,
       enum: ['server', 'byok', 'trial'],

@@ -29,7 +29,6 @@ import { isSubscriptionActive } from './utils/security.js';
 import { User } from './models/User.js';
 import {
   loadByokSettingsFromDb,
-  loadFreeTrialSettingsFromDb,
   loadPaymentMethodsSettingsFromDb,
   loadUtrPayDetailsFromDb,
   loadPlansFromDb
@@ -260,7 +259,6 @@ async function connectMongo(attempt = 1) {
       await Promise.all([
         loadPlansFromDb(),
         loadByokSettingsFromDb(),
-        loadFreeTrialSettingsFromDb(),
         loadPaymentMethodsSettingsFromDb(),
         loadUtrPayDetailsFromDb(),
         loadSmtpSettingsFromDb(),
@@ -268,7 +266,7 @@ async function connectMongo(attempt = 1) {
         loadSocialMediaFromDb(),
         loadPlatformBrokerFromDb()
       ]);
-      console.log('[Membership] Plans + BYOK + free-trial + payment-methods + UTR + SMTP + email templates + social loaded from DB.');
+      console.log('[Membership] Plans + BYOK + payment-methods + UTR + SMTP + email templates + social loaded from DB.');
     } catch (planErr) {
       console.warn('[Membership] Using default in-memory plans:', planErr.message || planErr);
     }

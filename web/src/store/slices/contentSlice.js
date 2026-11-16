@@ -3,7 +3,6 @@ import { createSlice } from '@reduxjs/toolkit';
 const initialState = {
   plans: [],
   tierRules: {
-    trial: { maxStocks: 8, allowedTimeframes: ['15m'], realTimeSpeedMs: 3000 },
     starter: { maxStocks: 30, allowedTimeframes: ['5m', '15m'], realTimeSpeedMs: 1500 },
     pro: { maxStocks: 200, allowedTimeframes: ['1m', '5m', '15m'], realTimeSpeedMs: 500 }
   },

@@ -15,9 +15,7 @@ import {
 import { allowMemoryAuth, dbUnavailableResponse, isDbReady } from '../utils/db.js';
 import {
   buildSignupSubscription,
-  getByokSalesEnabled,
-  getFreeTrialDays,
-  getFreeTrialEnabled
+  getByokSalesEnabled
 } from '../services/membershipPlans.js';
 import {
   connectByok,
@@ -55,7 +53,7 @@ const sanitizeUser = (user) => ({
         status: user.subscription.status,
         plan: user.subscription.plan,
         planId: user.subscription.planId || null,
-        mode: user.subscription.mode || 'trial',
+        mode: user.subscription.mode || 'server',
         byokGranted: !!user.subscription.byokGranted,
         expiresAt: user.subscription.expiresAt
       }
@@ -675,8 +673,6 @@ router.get('/me', authMiddleware, (req, res) => {
     success: true,
     user: sanitizeUser(req.user),
     byokSalesEnabled: getByokSalesEnabled(),
-    freeTrialEnabled: getFreeTrialEnabled(),
-    freeTrialDays: getFreeTrialDays()
   });
 });
 
@@ -766,7 +762,7 @@ router.get('/byok', authMiddleware, (req, res) => {
     success: true,
     byok: getByokPublicStatus(req.user),
     byokSalesEnabled: getByokSalesEnabled(),
-    subscriptionMode: req.user?.subscription?.mode || 'trial'
+    subscriptionMode: req.user?.subscription?.mode || 'server'
   });
 });
 
@@ -958,15 +954,11 @@ router.put('/byok', authMiddleware, async (req, res) => {
       return res.status(429).json({ success: false, message: 'Too many BYOK updates. Try again later.' });
     }
 
-    const granted =
-      req.user?.subscription?.byokGranted ||
-      req.user?.subscription?.mode === 'byok' ||
-      getByokSalesEnabled();
-
-    if (!granted) {
+    // Only BYOK memberships may store broker keys (prevents server-plan feed hijack).
+    if (req.user?.subscription?.mode !== 'byok') {
       return res.status(403).json({
         success: false,
-        message: 'BYOK is not available on your account.'
+        message: 'Broker API keys are only for BYOK memberships. Your plan uses the platform feed.'
       });
     }
 
@@ -991,15 +983,13 @@ router.put('/byok', authMiddleware, async (req, res) => {
         }
         user.byok = byokBundle;
         if (user.subscription) {
+          user.subscription.mode = 'byok';
           user.subscription.byokGranted = true;
-          if (user.subscription.mode !== 'byok') {
-            // Keep mode as purchased; credentials still stored for when they switch back
-          }
         }
         await user.save();
         return res.json({
           success: true,
-          message: 'BYOK credentials updated. New Kotak session stored securely.',
+          message: 'BYOK credentials updated. Broker session stored securely.',
           user: sanitizeUser(user),
           byok: getByokPublicStatus(user)
         });

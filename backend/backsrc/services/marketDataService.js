@@ -151,6 +151,41 @@ export class MarketDataService {
     this.updateInterval = null;
     /** symbol|tf|range → Promise — coalesce concurrent chart fetches */
     this._historyInflight = new Map();
+    /** Platform Upstox adapter — chart fallback when Kotak has no candles */
+    this._upstoxAdapter = null;
+    this._upstoxToken = '';
+    this._upstoxInit = null;
+  }
+
+  async _ensureUpstoxAdapter() {
+    const { getPlatformBrokerRuntime } = await import('./platformBrokerService.js');
+    const token =
+      getPlatformBrokerRuntime().upstox?.accessToken || process.env.UPSTOX_ACCESS_TOKEN || '';
+    if (!token) return null;
+
+    if (this._upstoxAdapter && this._upstoxToken === token) {
+      await this._upstoxInit;
+      return this._upstoxAdapter;
+    }
+
+    const { createUpstoxEquityAdapter } = await import('./marketBrokers/upstoxEquity.js');
+    this._upstoxAdapter = createUpstoxEquityAdapter({ accessToken: token });
+    this._upstoxToken = token;
+    this._upstoxInit = this._upstoxAdapter.init(FNO_UNIVERSE.map((s) => s.symbol));
+    await this._upstoxInit;
+    return this._upstoxAdapter;
+  }
+
+  async _fetchUpstoxCandles(symbol, { timeframe, rangeDays }) {
+    try {
+      const adapter = await this._ensureUpstoxAdapter();
+      if (!adapter) return [];
+      const rows = await adapter.fetchHistoricalCandles(symbol, { timeframe, rangeDays });
+      return Array.isArray(rows) ? rows : [];
+    } catch (e) {
+      console.warn(`[MarketDataService] Upstox chart fallback ${symbol}:`, e.message);
+      return [];
+    }
   }
 
   addPriorityStock(symbol) {
@@ -336,6 +371,13 @@ export class MarketDataService {
               stock.high = Math.max(...candles.map((c) => c.high));
               stock.low = Math.min(...candles.map((c) => c.low));
               stock.smcData = smcEngine.analyze(candles, stock.symbol, '5m');
+              // Seed chart cache so opening chart doesn't re-hit Kotak (429 / empty first load).
+              stock.chartCache = {
+                key: '5m:2',
+                candles,
+                smcData: stock.smcData,
+                fetchedAt: Date.now()
+              };
               warmed += 1;
               // Push setups to Terminal as soon as a few names have SMC.
               if (warmed === 3 || warmed % 8 === 0) this.broadcastScreener();
@@ -780,41 +822,88 @@ export class MarketDataService {
     let high = stock.high;
     let low = stock.low;
 
-    const cacheHit =
-      stock.chartCache?.key === cacheKey &&
-      Array.isArray(stock.chartCache.candles) &&
-      stock.chartCache.candles.length > 0 &&
+    const cacheFresh =
+      stock.chartCache?.candles?.length > 0 &&
       Date.now() - (stock.chartCache.fetchedAt || 0) < CHART_CACHE_TTL_MS;
+    const cacheHit = cacheFresh && stock.chartCache.key === cacheKey;
+    // Same TF warm (e.g. screener 5m:2) while UI asks 5m:5 — show immediately, refresh below.
+    const softCacheHit =
+      !cacheHit &&
+      cacheFresh &&
+      String(stock.chartCache.key || '').startsWith(`${timeframe}:`);
 
-    if (cacheHit) {
+    if (cacheHit || softCacheHit) {
       candles = stock.chartCache.candles;
       smcData = stock.chartCache.smcData;
       dataSource = 'live';
       high = Math.max(...candles.map((c) => c.high));
       low = Math.min(...candles.map((c) => c.low));
-    } else {
+    } else if (
+      timeframe === '5m' &&
+      Array.isArray(stock.candles) &&
+      stock.candles.length > 0
+    ) {
+      // List already warmed this symbol — serve it on first chart open (no Kotak re-hit).
+      candles = stock.candles;
+      smcData = stock.smcData || smcEngine.analyze(candles, stock.symbol, timeframe);
+      dataSource = 'live';
+      high = Math.max(...candles.map((c) => c.high));
+      low = Math.min(...candles.map((c) => c.low));
+      stock.chartCache = {
+        key: cacheKey,
+        candles,
+        smcData,
+        fetchedAt: Date.now()
+      };
+    }
+
+    // Only hit Kotak when we still have nothing (or need a different TF than warm).
+    if (!candles.length) {
       const inflightKey = `${stock.symbol}|${cacheKey}`;
       let fetchPromise = this._historyInflight.get(inflightKey);
 
       if (!fetchPromise) {
         fetchPromise = (async () => {
+          let filtered = [];
+          let provider = 'kotak';
+
           const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
-          if (!mapping || !(kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
-            return null;
+          if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
+            try {
+              const realCandles = await kotakNeoService.fetchHistoricalCandles(
+                mapping.segment,
+                mapping.token,
+                { timeframe, rangeDays }
+              );
+              filtered = filterNseSessionCandles(realCandles || [], timeframe);
+            } catch (e) {
+              console.warn(`[MarketDataService] Kotak chart ${stock.symbol}:`, e.message);
+            }
           }
-          const realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
-            timeframe,
-            rangeDays
-          });
-          if (!realCandles?.length) return null;
-          const filtered = filterNseSessionCandles(realCandles, timeframe);
+
+          // Kotak empty / failed → try platform Upstox
+          if (!filtered.length) {
+            const upCandles = await this._fetchUpstoxCandles(stock.symbol, {
+              timeframe,
+              rangeDays
+            });
+            filtered = filterNseSessionCandles(upCandles, timeframe);
+            if (filtered.length) {
+              provider = 'upstox';
+              console.log(
+                `[MarketDataService] Chart ${stock.symbol} ${timeframe}/${rangeDays}d via Upstox fallback`
+              );
+            }
+          }
+
           if (!filtered.length) return null;
           const analyzed = smcEngine.analyze(filtered, stock.symbol, timeframe);
           stock.chartCache = {
             key: cacheKey,
             candles: filtered,
             smcData: analyzed,
-            fetchedAt: Date.now()
+            fetchedAt: Date.now(),
+            provider
           };
           if (timeframe === '5m' && rangeDays <= 29) {
             stock.candles = filtered;
@@ -857,6 +946,7 @@ export class MarketDataService {
       timeframe,
       rangeDays,
       dataSource,
+      chartProvider: stock.chartCache?.provider || null,
       isLive: dataSource === 'live' && this.isRealData === true,
       candles,
       smcData

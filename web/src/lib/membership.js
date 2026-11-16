@@ -11,15 +11,15 @@ export const TIER_FEATURES = {
     allowFullFVG: false,
     upgradeHint: 'Renew or upgrade a plan to restore Charts and Market X-Ray access.'
   },
-  trial: {
-    key: 'trial',
-    label: 'Trial Access',
-    maxStocksVisible: 200,
-    timeframesAllowed: ['1m', '3m', '5m', '15m', '1h', '1d'],
+  activeFallback: {
+    key: 'active-fallback',
+    label: 'Active',
+    maxStocksVisible: 30,
+    timeframesAllowed: ['5m', '15m'],
     allowTerminal: true,
     allowMarketXRay: true,
     allowFullFVG: true,
-    upgradeHint: null
+    upgradeHint: 'Upgrade your membership for more stocks and timeframes.'
   }
 };
 
@@ -102,7 +102,6 @@ export function getMembership(user, plans = []) {
       status: 'expired',
       expiresAt: sub?.expiresAt || null,
       isExpired: true,
-      isTrial: false,
       isStarter: false,
       isPro: false,
       canUseTimeframe: () => false
@@ -122,33 +121,24 @@ export function getMembership(user, plans = []) {
       byokGranted: !!sub?.byokGranted,
       expiresAt: sub?.expiresAt || null,
       isExpired: false,
-      isTrial: features.price === 0 || (features.durationDays || 0) <= 14,
       isStarter: !isTop && features.maxStocksVisible <= 50,
       isPro: isTop,
       canUseTimeframe: (tf) => features.timeframesAllowed.includes(tf)
     };
   }
 
-  const fallback =
-    sub?.status === 'active'
-      ? {
-          ...TIER_FEATURES.trial,
-          maxStocksVisible: 30,
-          timeframesAllowed: ['5m', '15m'],
-          allowFullFVG: true,
-          key: 'active-fallback',
-          label: sub.plan || 'Active'
-        }
-      : TIER_FEATURES.trial;
+  const fallback = {
+    ...TIER_FEATURES.activeFallback,
+    label: sub?.plan || TIER_FEATURES.activeFallback.label
+  };
 
   return {
     ...fallback,
     planName: sub?.plan || fallback.label,
-    status: sub?.status || 'trial',
+    status: sub?.status || 'active',
     expiresAt: sub?.expiresAt || null,
     isExpired: false,
-    isTrial: sub?.status !== 'active',
-    isStarter: sub?.status === 'active',
+    isStarter: true,
     isPro: false,
     canUseTimeframe: (tf) => fallback.timeframesAllowed.includes(tf)
   };

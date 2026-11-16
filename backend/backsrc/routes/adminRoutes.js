@@ -20,17 +20,15 @@ import {
   setByokSalesEnabled,
   persistByokSettings,
   persistPlans,
-  getFreeTrialEnabled,
-  getFreeTrialDays,
-  setFreeTrialSettings,
-  persistFreeTrialSettings,
   getPaymentMethodsSettings,
   setPaymentMethodsSettings,
   persistPaymentMethodsSettings,
   getUtrPayDetails,
   setUtrPayDetails,
   persistUtrPayDetails,
-  buildSignupSubscription
+  buildSignupSubscription,
+  findPlanByName,
+  stackSubscriptionExpiry
 } from '../services/membershipPlans.js';
 import { getByokPublicStatus } from '../services/byokSessionService.js';
 import {
@@ -102,7 +100,6 @@ router.get('/overview', authMiddleware, subAdminOrAdmin, async (req, res) => {
 
     const totalUsers = users.length;
     const activeSubscribers = users.filter(u => u.subscription?.status === 'active').length;
-    const trialUsers = users.filter(u => u.subscription?.status === 'trial').length;
     const estimatedMRR = activeSubscribers * 1250;
 
     const usersWithByok = users.map((u) => {
@@ -115,15 +112,13 @@ router.get('/overview', authMiddleware, subAdminOrAdmin, async (req, res) => {
 
     res.json({
       success: true,
-      stats: { totalUsers, activeSubscribers, trialUsers, estimatedMRR },
+      stats: { totalUsers, activeSubscribers, estimatedMRR },
       users: usersWithByok,
       plans: getPlans(),
       settings: {
         ...maskBrokerSettings(systemSettings),
         platformBroker: getPlatformBrokerPublic(),
         byokSalesEnabled: getByokSalesEnabled(),
-        freeTrialEnabled: getFreeTrialEnabled(),
-        freeTrialDays: getFreeTrialDays(),
         ...getPaymentMethodsSettings(),
         utrPay: getUtrPayDetails(),
         smtp: getPublicSmtpSettings(),
@@ -238,7 +233,7 @@ router.post('/users/import', authMiddleware, adminOnly, async (req, res) => {
 
       const plan = String(row.plan || row.subscriptionPlan || 'No Active Plan').trim();
       let status = String(row.status || row.subscriptionStatus || 'expired').trim().toLowerCase();
-      if (!['active', 'trial', 'expired'].includes(status)) status = 'expired';
+      if (!['active', 'expired'].includes(status)) status = 'expired';
 
       const password = String(row.password || '').trim() || `Import@${Math.random().toString(36).slice(2, 10)}a1`;
       const days = Number(row.durationDays || row.days);
@@ -326,9 +321,20 @@ router.put('/users/:id', authMiddleware, subAdminOrAdmin, async (req, res) => {
         if (name) u.name = name;
         if (email) u.email = email;
         if (role) u.role = role;
-        if (plan) u.subscription.plan = plan;
+        if (plan) {
+          u.subscription.plan = plan;
+          const matched = findPlanByName(plan);
+          if (matched) {
+            u.subscription.planId = matched.id;
+            u.subscription.mode = matched.mode === 'byok' ? 'byok' : 'server';
+            u.subscription.byokGranted = matched.mode === 'byok';
+          }
+        }
         if (status) u.subscription.status = status;
-        if (extendDays) u.subscription.expiresAt = new Date(Date.now() + extendDays * 24 * 3600 * 1000);
+        if (extendDays) {
+          u.subscription.expiresAt = stackSubscriptionExpiry(u.subscription.expiresAt, extendDays);
+          if (!status) u.subscription.status = 'active';
+        }
         await u.save();
         updatedUser = u;
       }
@@ -342,9 +348,20 @@ router.put('/users/:id', authMiddleware, subAdminOrAdmin, async (req, res) => {
         if (name) u.name = name;
         if (email) u.email = email;
         if (role) u.role = role;
-        if (plan) u.subscription.plan = plan;
+        if (plan) {
+          u.subscription.plan = plan;
+          const matched = findPlanByName(plan);
+          if (matched) {
+            u.subscription.planId = matched.id;
+            u.subscription.mode = matched.mode === 'byok' ? 'byok' : 'server';
+            u.subscription.byokGranted = matched.mode === 'byok';
+          }
+        }
         if (status) u.subscription.status = status;
-        if (extendDays) u.subscription.expiresAt = new Date(Date.now() + extendDays * 24 * 3600 * 1000);
+        if (extendDays) {
+          u.subscription.expiresAt = stackSubscriptionExpiry(u.subscription.expiresAt, extendDays);
+          if (!status) u.subscription.status = 'active';
+        }
         updatedUser = u;
       }
     }
@@ -375,21 +392,55 @@ router.delete('/users/:id', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-// QUICK EXTEND USER SUB
+// QUICK EXTEND USER SUB (MongoDB first; stacks remaining days)
 router.post('/users/:id/subscription', authMiddleware, subAdminOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, plan, extendDays } = req.body;
-    const newExpiry = new Date(Date.now() + (extendDays || 30) * 24 * 3600 * 1000);
+    const days = Number(extendDays) || 30;
 
-    const u = inMemoryUsers.find(item => item._id === id);
-    if (u) {
+    const applySub = (u) => {
+      if (!u.subscription) u.subscription = {};
+      if (plan) {
+        u.subscription.plan = plan;
+        const matched = findPlanByName(plan);
+        if (matched) {
+          u.subscription.planId = matched.id;
+          u.subscription.mode = matched.mode === 'byok' ? 'byok' : 'server';
+          u.subscription.byokGranted = matched.mode === 'byok';
+        }
+      }
       if (status) u.subscription.status = status;
-      if (plan) u.subscription.plan = plan;
-      if (extendDays) u.subscription.expiresAt = newExpiry;
-      return res.json({ success: true, message: 'Subscription updated', user: u });
+      else u.subscription.status = 'active';
+      if (extendDays || days) {
+        u.subscription.expiresAt = stackSubscriptionExpiry(u.subscription.expiresAt, days);
+      }
+      return u;
+    };
+
+    try {
+      const u = await User.findById(id);
+      if (u) {
+        applySub(u);
+        await u.save();
+        const plain = typeof u.toObject === 'function' ? u.toObject() : u;
+        return res.json({
+          success: true,
+          message: 'Subscription updated',
+          user: { ...plain, password: undefined }
+        });
+      }
+    } catch {
+      /* fall through to memory */
     }
-    res.status(404).json({ success: false, message: 'User not found' });
+
+    const mem = inMemoryUsers.find((item) => String(item._id) === String(id));
+    if (mem) {
+      applySub(mem);
+      return res.json({ success: true, message: 'Subscription updated', user: mem });
+    }
+
+    return res.status(404).json({ success: false, message: 'User not found' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -408,9 +459,7 @@ router.get('/public-plans', (req, res) => {
   res.json({
     success: true,
     plans,
-    byokSalesEnabled: byokOn,
-    freeTrialEnabled: getFreeTrialEnabled(),
-    freeTrialDays: getFreeTrialDays()
+    byokSalesEnabled: byokOn
   });
 });
 
@@ -420,9 +469,7 @@ router.get('/plans', authMiddleware, subAdminOrAdmin, (req, res) => {
     success: true,
     plans,
     durationOptions: DURATION_MONTH_OPTIONS,
-    byokSalesEnabled: getByokSalesEnabled(),
-    freeTrialEnabled: getFreeTrialEnabled(),
-    freeTrialDays: getFreeTrialDays()
+    byokSalesEnabled: getByokSalesEnabled()
   });
 });
 
@@ -506,17 +553,6 @@ router.post('/settings/byok', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
-});
-
-// ================= FREE TRIAL TOGGLE (default OFF) =================
-
-router.get('/settings/free-trial', authMiddleware, subAdminOrAdmin, (req, res) => {
-  res.json({
-    success: true,
-    freeTrialEnabled: getFreeTrialEnabled(),
-    freeTrialDays: getFreeTrialDays(),
-    note: 'Default is OFF. When ON, only new signups get a trial. Existing users are unchanged.'
-  });
 });
 
 router.get('/settings/payments', authMiddleware, subAdminOrAdmin, (req, res) => {
@@ -661,42 +697,10 @@ router.post('/settings/utr-qr-upload', authMiddleware, adminOnly, async (req, re
   }
 });
 
-router.post('/settings/free-trial', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const enabled =
-      req.body.freeTrialEnabled !== undefined
-        ? !!req.body.freeTrialEnabled
-        : req.body.enabled !== undefined
-          ? !!req.body.enabled
-          : getFreeTrialEnabled();
-    const days =
-      req.body.freeTrialDays !== undefined ? req.body.freeTrialDays : req.body.days;
-    setFreeTrialSettings({ enabled, days });
-    try {
-      await persistFreeTrialSettings();
-    } catch {
-      /* in-memory still works */
-    }
-    const on = getFreeTrialEnabled();
-    res.json({
-      success: true,
-      message: on
-        ? `Free trial ON for new signups (${getFreeTrialDays()} days).`
-        : 'Free trial OFF — new signups get no trial access until they buy a plan.',
-      freeTrialEnabled: on,
-      freeTrialDays: getFreeTrialDays()
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/** Public: signup / pricing pages can show whether trial is offered */
+/** Public: signup / pricing pages */
 router.get('/public-signup-settings', (_req, res) => {
   res.json({
     success: true,
-    freeTrialEnabled: getFreeTrialEnabled(),
-    freeTrialDays: getFreeTrialDays(),
     byokSalesEnabled: getByokSalesEnabled()
   });
 });

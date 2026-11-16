@@ -3,7 +3,6 @@ import {
   ShieldCheck,
   Users,
   CreditCard,
-  Radio,
   Megaphone,
   CheckCircle,
   AlertCircle,
@@ -154,17 +153,6 @@ export default function AdminPanelView() {
             {stats.activeSubscribers || 1}
           </div>
           <div className="mt-1 text-[11px] text-slate-500">12-Mo & Monthly users</div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-          <div className="text-xs text-slate-400 flex items-center justify-between">
-            <span>Free Trials</span>
-            <Radio className="h-4 w-4 text-amber-400" />
-          </div>
-          <div className="mt-2 text-2xl font-mono font-extrabold text-amber-400">
-            {stats.trialUsers || 1}
-          </div>
-          <div className="mt-1 text-[11px] text-slate-500">14-day evaluation period</div>
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
@@ -332,12 +320,10 @@ export default function AdminPanelView() {
                         className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                           u.subscription?.status === 'active' && !isExpired
                             ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
-                            : u.subscription?.status === 'trial'
-                            ? 'bg-amber-950 text-amber-400 border border-amber-800/50'
                             : 'bg-rose-950 text-rose-400 border border-rose-800/50'
                         }`}
                       >
-                        {isExpired ? 'EXPIRED' : (u.subscription?.status || 'TRIAL').toUpperCase()}
+                        {isExpired ? 'EXPIRED' : (u.subscription?.status || 'EXPIRED').toUpperCase()}
                       </span>
                     </td>
                     <td className="px-6 py-3.5 text-slate-400 text-[11px] font-sans">

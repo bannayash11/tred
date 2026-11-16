@@ -61,8 +61,8 @@ You are responsible for keeping your login credentials secure and for all activi
 ### 4. Acceptable Use
 You agree not to misuse the platform, attempt unauthorized access, scrape data abusively, or disrupt service for other users.
 
-### 5. Subscriptions & Trials
-Paid plans and free trials are subject to the pricing and duration shown at signup or on the Pricing page. Refunds, if any, follow our published policy.
+### 5. Subscriptions
+Paid plans are subject to the pricing and duration shown on the Pricing page. Refunds, if any, follow our published policy.
 
 ### 6. Risk Disclosure
 Trading in futures and options involves substantial risk of loss. Past performance does not guarantee future results. You alone are responsible for your trading decisions.
@@ -99,9 +99,9 @@ Questions about these terms can be sent through the Contact page.`,
           'No. Tradrift provides analytics and education tools. All trading decisions and risk remain solely with you.'
       },
       {
-        question: 'What is included in the free trial?',
+        question: 'How do I get access after signup?',
         answer:
-          'New traders get a 14-day institutional trial with access to the live terminal and Market X-Ray based on the trial plan limits.'
+          'Create an account, then choose a membership plan on Pricing / Checkout. Charts and Market X-Ray unlock after payment is confirmed.'
       },
       {
         question: 'How do I cancel or manage my plan?',

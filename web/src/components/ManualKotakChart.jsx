@@ -572,16 +572,13 @@ export default function ManualKotakChart({
     };
   }, [stockData, timeframe, asPage, seriesRef, currentCandleRef, overlayKey]);
 
+  // Full-page ChartFullLoader covers the site; keep a quiet placeholder here.
   if (loading) {
-    return (
-      <div className="flex h-full min-h-[24rem] flex-col items-center justify-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400/30 border-t-cyan-400" />
-        <p className="text-xs text-slate-400">Loading {timeframe} candles…</p>
-      </div>
-    );
+    return <div className="min-h-[24rem] w-full flex-1 bg-[#090d16]" aria-hidden />;
   }
 
-  if (error || !stockData?.candles?.length) {
+  // Prefer rendering candles even if a soft warning was set (list already had data).
+  if (!stockData?.candles?.length) {
     return (
       <div className="flex h-full min-h-[24rem] flex-col items-center justify-center gap-2 px-6 text-center">
         <span className="text-sm font-semibold text-slate-300">No chart data</span>

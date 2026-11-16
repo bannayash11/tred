@@ -60,7 +60,7 @@ export function isSubscriptionActive(user) {
     const exp = new Date(sub.expiresAt);
     if (!Number.isNaN(exp.getTime()) && exp.getTime() < Date.now()) return false;
   }
-  return sub.status === 'active' || sub.status === 'trial';
+  return sub.status === 'active';
 }
 
 export function maskBrokerSettings(settings = {}) {

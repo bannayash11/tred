@@ -6,7 +6,6 @@ import {
   updateBrokerConfig,
   updateAnnouncementConfig,
   updateByokSalesConfig,
-  updateFreeTrialConfig,
   updatePaymentMethodsConfig,
   updateUtrPayConfig,
   uploadUtrQrImage,
@@ -44,8 +43,6 @@ export function AdminProvider({ children }) {
     announcement: '🔴 Live Market Updates Active: High institutional volume detected in Nifty Banking & Auto sectors.',
     announcementEnabled: true,
     byokSalesEnabled: true,
-    freeTrialEnabled: false,
-    freeTrialDays: 14,
     razorpayEnabled: false,
     utrEnabled: true,
     utrAutoApprove: false,
@@ -95,14 +92,6 @@ export function AdminProvider({ children }) {
               res.settings.byokSalesEnabled !== undefined
                 ? res.settings.byokSalesEnabled
                 : prev.byokSalesEnabled,
-            freeTrialEnabled:
-              res.settings.freeTrialEnabled !== undefined
-                ? res.settings.freeTrialEnabled
-                : prev.freeTrialEnabled,
-            freeTrialDays:
-              res.settings.freeTrialDays !== undefined
-                ? res.settings.freeTrialDays
-                : prev.freeTrialDays,
             razorpayEnabled:
               res.settings.razorpayEnabled !== undefined
                 ? res.settings.razorpayEnabled
@@ -234,26 +223,15 @@ export function AdminProvider({ children }) {
     try {
       const res = await updateUserSub(id, payload);
       if (res.success) {
-        setUsersList(prev => prev.map(u => u._id === id ? res.user : u));
+        setUsersList((prev) => prev.map((u) => (u._id === id ? res.user : u)));
         showToast('Subscription updated successfully!');
+        return;
       }
-    } catch {
-      setUsersList(prev => prev.map(u => {
-        if (u._id === id) {
-          const newExp = new Date(Date.now() + (payload.extendDays || 30) * 24 * 3600 * 1000);
-          return {
-            ...u,
-            subscription: {
-              ...u.subscription,
-              status: payload.status || u.subscription.status,
-              plan: payload.plan || u.subscription.plan,
-              expiresAt: newExp
-            }
-          };
-        }
-        return u;
-      }));
-      showToast('Subscription extended (Offline Mode)!');
+      showToast(res?.message || 'Could not update subscription.');
+    } catch (err) {
+      showToast(
+        err?.userMessage || err?.response?.data?.message || 'Could not update subscription on server.'
+      );
     }
   };
 
@@ -427,26 +405,6 @@ export function AdminProvider({ children }) {
     }
   };
 
-  const saveFreeTrial = async ({ enabled, days } = {}) => {
-    try {
-      const res = await updateFreeTrialConfig({
-        freeTrialEnabled: enabled,
-        freeTrialDays: days
-      });
-      setSystemSettings((prev) => ({
-        ...prev,
-        freeTrialEnabled:
-          res.freeTrialEnabled !== undefined ? res.freeTrialEnabled : !!enabled,
-        freeTrialDays: res.freeTrialDays !== undefined ? res.freeTrialDays : days ?? prev.freeTrialDays
-      }));
-      showToast(res.message || (enabled ? 'Free trial ON' : 'Free trial OFF'));
-      return res;
-    } catch (err) {
-      showToast(err?.userMessage || err?.response?.data?.message || 'Could not update free trial.');
-      throw err;
-    }
-  };
-
   const savePaymentMethods = async ({ razorpayEnabled, utrEnabled, utrAutoApprove } = {}) => {
     try {
       const res = await updatePaymentMethodsConfig({
@@ -512,7 +470,6 @@ export function AdminProvider({ children }) {
   const stats = {
     totalUsers: usersList.length,
     activeSubscribers: usersList.filter(u => u.subscription?.status === 'active').length,
-    trialUsers: usersList.filter(u => u.subscription?.status === 'trial').length,
     estimatedMRR: usersList.filter(u => u.subscription?.status === 'active').length * 1250
   };
 
@@ -538,7 +495,6 @@ export function AdminProvider({ children }) {
         loading,
         refreshData: loadData,
         saveByokSales,
-        saveFreeTrial,
         savePaymentMethods,
         saveUtrPay,
         uploadUtrQr,

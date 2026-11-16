@@ -99,15 +99,13 @@ function initialsFrom(user) {
 
 function statusLabel(status) {
   if (status === 'active') return 'Pro Active';
-  if (status === 'trial') return 'Trial';
   if (status === 'cancelled') return 'Cancelled';
   if (status === 'expired') return 'Expired';
-  return status || 'Trial';
+  return status || 'Expired';
 }
 
 function statusTone(status) {
   if (status === 'active') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-  if (status === 'trial') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
   return 'bg-slate-500/15 text-slate-300 border-slate-500/30';
 }
 
@@ -175,9 +173,9 @@ export default function UserDashboardView({ onOpenPricing }) {
     }
   }, [user, loadPayments, loadSessions]);
 
-  const planName = user?.subscription?.plan || '14-Day Free Trial';
-  const status = user?.subscription?.status || 'trial';
-  const feedMode = user?.subscription?.mode || 'trial';
+  const planName = user?.subscription?.plan || 'No Active Plan';
+  const status = user?.subscription?.status || 'expired';
+  const feedMode = user?.subscription?.mode || 'server';
   const byokStatus = user?.byok?.status || 'none';
   const expiresAt = user?.subscription?.expiresAt
     ? new Date(user.subscription.expiresAt)
@@ -185,16 +183,16 @@ export default function UserDashboardView({ onOpenPricing }) {
 
   const daysLeft = Math.max(0, Math.ceil((expiresAt - new Date()) / (1000 * 60 * 60 * 24)));
   const isPro = status === 'active';
-  const trialWindow = isPro ? 365 : 14;
+  const trialWindow = isPro ? 365 : Math.max(daysLeft || 1, 1);
   const daysPct = Math.max(4, Math.min(100, Math.round((daysLeft / trialWindow) * 100)));
 
   const entitlements = useMemo(
     () => [
-      isPro ? 'All 200+ NSE F&O stocks unlocked' : 'Top 8 large-cap F&O stocks (trial)',
-      isPro ? '1-min & 5-min real-time scans' : '15-min candle analysis (trial)',
+      isPro ? 'All 200+ NSE F&O stocks unlocked' : 'Choose a membership plan to unlock stocks',
+      isPro ? '1-min & 5-min real-time scans' : 'Charts unlock after plan purchase',
       'Automatic order block & liquidity lines',
       'Market X-Ray macro heatmap',
-      isPro ? 'VIP Discord trading community' : 'VIP community (Pro only)'
+      isPro ? 'VIP Discord trading community' : 'VIP community (with active plan)'
     ],
     [isPro]
   );
@@ -314,11 +312,7 @@ export default function UserDashboardView({ onOpenPricing }) {
                 </div>
                 <span
                   className={`ud-status-dot ${
-                    status === 'active'
-                      ? 'bg-emerald-400'
-                      : status === 'trial'
-                        ? 'bg-amber-400'
-                        : 'bg-slate-400'
+                    status === 'active' ? 'bg-emerald-400' : 'bg-slate-400'
                   }`}
                   title={statusLabel(status)}
                 />
@@ -374,7 +368,7 @@ export default function UserDashboardView({ onOpenPricing }) {
                 <Sparkles className="h-3.5 w-3.5" />
                 {isPro ? 'Renew / change plan' : 'Upgrade membership'}
               </button>
-              {(status === 'active' || status === 'trial') && (
+              {status === 'active' && (
                 <button
                   type="button"
                   onClick={() => setShowCancelConfirm(true)}
@@ -458,7 +452,7 @@ export default function UserDashboardView({ onOpenPricing }) {
                       <CalendarDays className="h-3 w-3" /> Billing
                     </div>
                     <p className="mt-1 text-sm font-semibold text-slate-100">
-                      {isPro ? '12 months' : '14-day trial'}
+                      {isPro ? 'Active membership' : 'No active plan'}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-3">
@@ -583,7 +577,7 @@ export default function UserDashboardView({ onOpenPricing }) {
                 <div className="rounded-2xl border border-slate-800/80 bg-slate-950/45 p-4 text-center">
                   <div className="text-[11px] text-slate-500">Billing cycle</div>
                   <div className="mt-2 text-sm font-bold text-emerald-300">
-                    {isPro ? '12 months prepaid' : '14-day evaluation'}
+                    {isPro ? '12 months prepaid' : 'Pay to unlock'}
                   </div>
                 </div>
               </div>
@@ -612,7 +606,7 @@ export default function UserDashboardView({ onOpenPricing }) {
                   <Sparkles className="h-3.5 w-3.5" />
                   {isPro ? 'Renew on Razorpay' : 'Buy membership'}
                 </button>
-                {(status === 'active' || status === 'trial') && (
+                {status === 'active' && (
                   <button
                     type="button"
                     onClick={() => setShowCancelConfirm(true)}

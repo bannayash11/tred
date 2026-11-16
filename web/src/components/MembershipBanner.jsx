@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crown, AlertTriangle, Sparkles, ArrowRight } from 'lucide-react';
+import { Crown, AlertTriangle, ArrowRight } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import { getMembership } from '../lib/membership';
 
@@ -32,23 +32,11 @@ export default function MembershipBanner({ user, onOpenPricing, compact = false 
   }
 
   return (
-    <div
-      className={`rounded-xl border px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 ${
-        m.isTrial
-          ? 'border-amber-800/30 bg-amber-950/20'
-          : 'border-slate-800/80 bg-slate-900/40'
-      }`}
-    >
+    <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
       <div className="flex items-center gap-2.5 min-w-0">
-        {m.isTrial ? (
-          <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-        ) : (
-          <Crown className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-        )}
+        <Crown className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
         <div className="min-w-0 text-[11px] text-slate-400">
-          <span className={`font-semibold ${m.isTrial ? 'text-amber-300' : 'text-cyan-300'}`}>
-            {m.planName}
-          </span>
+          <span className="font-semibold text-cyan-300">{m.planName}</span>
           <span className="mx-1.5 text-slate-600">·</span>
           <span>
             {m.maxStocksVisible} stocks · {m.timeframesAllowed.join(', ') || '—'}

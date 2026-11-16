@@ -12,6 +12,7 @@ import ManualKotakChart, {
   sanitizeCandle,
   isNseSessionCandle
 } from './ManualKotakChart';
+import ChartFullLoader from './ChartFullLoader';
 
 const OVERLAY_OPTIONS = [
   { key: 'orderBlocks', label: 'Order Blocks', hint: 'Demand / supply zones' },
@@ -26,11 +27,7 @@ const OVERLAY_OPTIONS = [
 const ALL_TIMEFRAMES = ['1m', '3m', '5m', '15m'];
 const RANGE_OPTIONS = [
   { key: '1D', days: 1, label: '1D' },
-  { key: '5D', days: 5, label: '5D' },
-  { key: '1M', days: 30, label: '1M' },
-  { key: '3M', days: 90, label: '3M' },
-  { key: '6M', days: 180, label: '6M' },
-  { key: '1Y', days: 365, label: '1Y' }
+  { key: '5D', days: 5, label: '5D' }
 ];
 const IST_TZ = 'Asia/Kolkata';
 const NSE_OPEN_MINS = 9 * 60 + 15;
@@ -139,49 +136,66 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   // 1. Candles: BYOK → browser/broker; Platform → server Kotak
   useEffect(() => {
     let isMounted = true;
+    let cancelled = false;
     setLoading(true);
     setFetchError('');
-    setStockData(null);
 
-    const load = useClientBrokerChart
-      ? fetchByokClientStock(symbol, { timeframe, rangeDays })
-      : fetchStock(symbol, { timeframe, rangeDays });
+    const loadOnce = () =>
+      useClientBrokerChart
+        ? fetchByokClientStock(symbol, { timeframe, rangeDays })
+        : fetchStock(symbol, { timeframe, rangeDays });
 
-    load
-      .then((res) => {
-        if (!isMounted) return;
-        if (res.success && res.stock) {
-          setStockData(res.stock);
-          setLivePrice(res.stock.currentPrice);
-          setLiveChange(res.stock.change);
-          if (!res.stock.candles?.length || res.stock.dataSource !== 'live') {
-            setFetchError(
-              useClientBrokerChart
-                ? 'No candles from your broker yet. Check token / market hours.'
-                : 'Live candle data unavailable. Waiting for platform market feed…'
-            );
+    const applyStock = (stock) => {
+      setStockData(stock);
+      setLivePrice(stock.currentPrice);
+      setLiveChange(stock.change);
+    };
+
+    const emptyMsg = useClientBrokerChart
+      ? 'No candles from your broker yet. Check token / market hours.'
+      : 'Live candle data unavailable from Kotak & Upstox. Try again shortly…';
+
+    (async () => {
+      let lastErr = null;
+      // First open often races Kotak warm / 429 — retry before showing empty.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (cancelled) return;
+        try {
+          const res = await loadOnce();
+          if (cancelled || !isMounted) return;
+          if (res.success && res.stock?.candles?.length && res.stock.dataSource === 'live') {
+            applyStock(res.stock);
+            setFetchError('');
+            return;
           }
-        } else {
-          setFetchError('Unable to load live chart data.');
-        }
-      })
-      .catch((err) => {
-        console.error('Error fetching stock details:', err);
-        if (isMounted) {
-          setFetchError(
+          if (res.success && res.stock) {
+            applyStock(res.stock);
+            lastErr = emptyMsg;
+          } else {
+            lastErr = 'Unable to load live chart data.';
+          }
+        } catch (err) {
+          console.error('Error fetching stock details:', err);
+          lastErr =
             err.message ||
-              err.userMessage ||
-              err.response?.data?.message ||
-              'Failed to load live chart.'
-          );
+            err.userMessage ||
+            err.response?.data?.message ||
+            'Failed to load live chart.';
         }
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        }
+      }
+      if (!cancelled && isMounted) {
+        setFetchError(lastErr || emptyMsg);
+      }
+    })().finally(() => {
+      if (isMounted) setLoading(false);
+    });
 
     return () => {
       isMounted = false;
+      cancelled = true;
     };
   }, [symbol, timeframe, rangeDays, useClientBrokerChart]);
 
@@ -265,6 +279,9 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
 
   const content = (
       <div className={shellClass}>
+        {loading ? (
+          <ChartFullLoader symbol={symbol} timeframe={timeframe} rangeKey={rangeKey} />
+        ) : null}
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 px-4 sm:px-6 py-4 bg-slate-900/50">
           <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
@@ -294,6 +311,11 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                 {stockData?.dataSource === 'live' && (
                   <span className="rounded bg-emerald-950/80 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-800/50">
                     LIVE DATA
+                  </span>
+                )}
+                {stockData?.chartProvider === 'upstox' && (
+                  <span className="rounded bg-amber-950/80 px-2 py-0.5 text-[10px] font-bold text-amber-400 border border-amber-800/50">
+                    UPSTOX
                   </span>
                 )}
               </div>

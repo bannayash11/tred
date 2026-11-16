@@ -121,8 +121,6 @@ export const fetchCmsPages = () => api.get('/cms/pages').then((res) => res.data)
 export const fetchCmsPage = (slug) => api.get(`/cms/pages/${slug}`).then((res) => res.data);
 
 export const fetchPublicPlans = () => api.get('/admin/public-plans').then((res) => res.data);
-export const fetchPublicSignupSettings = () =>
-  api.get('/admin/public-signup-settings').then((res) => res.data);
 export const activateMembershipApi = (data) =>
   api.post('/auth/activate-membership', data).then((res) => res.data);
 

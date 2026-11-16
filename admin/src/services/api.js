@@ -75,8 +75,6 @@ export const updateUserSub = (id, data) => api.post(`/admin/users/${id}/subscrip
 export const updateBrokerConfig = (data) => api.post('/admin/settings/broker', data).then((res) => res.data);
 export const updateAnnouncementConfig = (data) => api.post('/admin/settings/announcement', data).then((res) => res.data);
 export const updateByokSalesConfig = (data) => api.post('/admin/settings/byok', data).then((res) => res.data);
-export const updateFreeTrialConfig = (data) =>
-  api.post('/admin/settings/free-trial', data).then((res) => res.data);
 export const updatePaymentMethodsConfig = (data) =>
   api.post('/admin/settings/payments', data).then((res) => res.data);
 export const updateUtrPayConfig = (data) =>

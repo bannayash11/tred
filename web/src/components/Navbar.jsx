@@ -421,7 +421,7 @@ export default function Navbar({
                           ? 'Pro'
                           : membership.isStarter
                             ? 'Starter'
-                            : 'Trial'}
+                            : 'Member'}
                     </span>
                   </div>
                   <ChevronDown

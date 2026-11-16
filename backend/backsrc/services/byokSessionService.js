@@ -449,13 +449,13 @@ export async function refreshByokSession(user) {
 
 /**
  * Resolve which market feed a user should use.
- * - server / trial → platform shared feed
+ * - server → platform shared feed
  * - byok (+ byokGranted) → user's connected broker session (no platform fallback)
  */
 export function classifyUserFeedMode(user) {
   const sub = user?.subscription || {};
-  const isByok = sub.mode === 'byok' || !!sub.byokGranted;
-  return isByok ? 'byok' : 'server';
+  // Only purchased BYOK mode uses client broker feed — never flip server plans via byokGranted.
+  return sub.mode === 'byok' ? 'byok' : 'server';
 }
 
 /**

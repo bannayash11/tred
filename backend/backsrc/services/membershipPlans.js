@@ -223,13 +223,6 @@ let inMemoryPlans = DEFAULT_PLANS.map((p) => normalizePlan(p));
 let byokSalesEnabled = true;
 
 /**
- * Free trial for new signups — DEFAULT OFF.
- * Admin can enable and set duration (days). Existing trial users keep their trial until expiry.
- */
-let freeTrialEnabled = false;
-let freeTrialDays = 14;
-
-/**
  * Checkout payment methods — admin toggles.
  * Razorpay DEFAULT OFF (manual UTR preferred until admin enables gateway).
  * UTR auto-approve is permanently OFF — membership only after admin verifies UTR.
@@ -273,6 +266,70 @@ export function findPlanById(id) {
   return inMemoryPlans.find((p) => p.id === id) || null;
 }
 
+export function findPlanByName(planName) {
+  const name = String(planName || '').trim().toLowerCase();
+  if (!name) return null;
+  return (
+    inMemoryPlans.find((p) => String(p.name || '').toLowerCase() === name) ||
+    inMemoryPlans.find((p) => name.includes(String(p.name || '').toLowerCase())) ||
+    inMemoryPlans.find((p) => String(p.name || '').toLowerCase().includes(name)) ||
+    null
+  );
+}
+
+/** Plan entitlements for an authenticated user (API enforcement). */
+export function resolveUserEntitlements(user) {
+  const sub = user?.subscription || {};
+  const plan =
+    (sub.planId && findPlanById(sub.planId)) ||
+    findPlanByName(sub.plan) ||
+    null;
+
+  if (plan) {
+    return {
+      plan,
+      maxStocks: Math.max(0, Number(plan.maxStocks) || 0),
+      timeframesAllowed: Array.isArray(plan.timeframesAllowed)
+        ? plan.timeframesAllowed.map((t) => String(t).toLowerCase())
+        : ['5m', '15m'],
+      allowTerminal: plan.allowTerminal !== false,
+      allowMarketXRay: plan.allowMarketXRay !== false
+    };
+  }
+
+  // Active without catalog match — conservative starter caps
+  return {
+    plan: null,
+    maxStocks: 30,
+    timeframesAllowed: ['5m', '15m'],
+    allowTerminal: true,
+    allowMarketXRay: true
+  };
+}
+
+export function applyScreenerPlanLimits(data, entitlements) {
+  if (!data) return data;
+  const max = Math.max(0, Number(entitlements?.maxStocks) || 0);
+  const bullish = (data.bullishSetups || []).slice(0, max);
+  const bearish = (data.bearishSetups || []).slice(0, max);
+  return {
+    ...data,
+    bullishSetups: bullish,
+    bearishSetups: bearish,
+    totalBullish: bullish.length,
+    totalBearish: bearish.length
+  };
+}
+
+/** Stack membership days onto remaining time (or from now if expired). */
+export function stackSubscriptionExpiry(currentExpiresAt, durationDays) {
+  const days = Math.max(1, Number(durationDays) || 30);
+  const now = Date.now();
+  const cur = currentExpiresAt ? new Date(currentExpiresAt).getTime() : 0;
+  const base = Number.isFinite(cur) && cur > now ? cur : now;
+  return new Date(base + days * 24 * 60 * 60 * 1000);
+}
+
 export function getByokSalesEnabled() {
   return byokSalesEnabled;
 }
@@ -282,36 +339,8 @@ export function setByokSalesEnabled(value) {
   return byokSalesEnabled;
 }
 
-export function getFreeTrialEnabled() {
-  return freeTrialEnabled;
-}
-
-export function getFreeTrialDays() {
-  return freeTrialDays;
-}
-
-export function setFreeTrialSettings({ enabled, days } = {}) {
-  if (enabled !== undefined) freeTrialEnabled = !!enabled;
-  if (days !== undefined) {
-    const n = Number(days);
-    if (Number.isFinite(n) && n >= 1 && n <= 90) freeTrialDays = Math.round(n);
-  }
-  return { freeTrialEnabled, freeTrialDays };
-}
-
-/** Subscription object applied on new user registration (respects admin trial toggle). */
+/** New signups get no access until they buy a plan. */
 export function buildSignupSubscription() {
-  if (freeTrialEnabled) {
-    const days = Math.max(1, freeTrialDays || 14);
-    return {
-      status: 'trial',
-      plan: `${days}-Day Free Trial`,
-      planId: null,
-      mode: 'trial',
-      byokGranted: false,
-      expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000)
-    };
-  }
   return {
     status: 'expired',
     plan: 'No Active Plan',
@@ -337,33 +366,6 @@ export async function persistByokSettings() {
   await Settings.findOneAndUpdate(
     { key: 'byok_platform' },
     { key: 'byok_platform', value: { salesEnabled: byokSalesEnabled }, updatedAt: new Date() },
-    { upsert: true, new: true }
-  );
-}
-
-export async function loadFreeTrialSettingsFromDb() {
-  try {
-    const doc = await Settings.findOne({ key: 'free_trial_platform' });
-    if (doc?.value) {
-      if (typeof doc.value.enabled === 'boolean') freeTrialEnabled = doc.value.enabled;
-      if (Number.isFinite(Number(doc.value.days))) {
-        const n = Number(doc.value.days);
-        if (n >= 1 && n <= 90) freeTrialDays = Math.round(n);
-      }
-    }
-  } catch {
-    /* keep defaults (OFF) */
-  }
-}
-
-export async function persistFreeTrialSettings() {
-  await Settings.findOneAndUpdate(
-    { key: 'free_trial_platform' },
-    {
-      key: 'free_trial_platform',
-      value: { enabled: freeTrialEnabled, days: freeTrialDays },
-      updatedAt: new Date()
-    },
     { upsert: true, new: true }
   );
 }

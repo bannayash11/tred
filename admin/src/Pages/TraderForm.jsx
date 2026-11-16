@@ -192,7 +192,7 @@ export default function TraderForm() {
               >
                 <option value="12 Months Pro Bundle">12 Months Pro Bundle</option>
                 <option value="Monthly Starter">Monthly Starter</option>
-                <option value="14-Day Free Trial">14-Day Free Trial</option>
+                <option value="No Active Plan">No Active Plan</option>
               </select>
             </div>
             <div>
@@ -203,7 +203,6 @@ export default function TraderForm() {
                 className="admin-input"
               >
                 <option value="active">Active</option>
-                <option value="trial">Trial</option>
                 <option value="expired">Expired</option>
               </select>
             </div>

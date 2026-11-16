@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sliders, Plus, Edit, Trash2, Eye, EyeOff, KeyRound, Gift } from 'lucide-react';
+import { Sliders, Plus, Edit, Trash2, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import ConfirmModal from '../components/ConfirmModal';
 import PageHeader from '../components/ui/PageHeader';
@@ -14,22 +14,13 @@ export default function Plans() {
     deletePlan,
     showToast,
     systemSettings,
-    saveByokSales,
-    saveFreeTrial
+    saveByokSales
   } = useAdmin();
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [byokSaving, setByokSaving] = useState(false);
-  const [trialSaving, setTrialSaving] = useState(false);
-  const [trialDaysDraft, setTrialDaysDraft] = useState(() => systemSettings?.freeTrialDays || 14);
-
-  useEffect(() => {
-    if (systemSettings?.freeTrialDays) setTrialDaysDraft(systemSettings.freeTrialDays);
-  }, [systemSettings?.freeTrialDays]);
 
   const byokSalesEnabled = systemSettings?.byokSalesEnabled !== false;
-  const freeTrialEnabled = !!systemSettings?.freeTrialEnabled;
-  const freeTrialDays = systemSettings?.freeTrialDays || 14;
   const isSuperAdmin = adminUser?.role === 'admin';
 
   const sortedPlans = useMemo(
@@ -50,40 +41,6 @@ export default function Plans() {
     }
   };
 
-  const toggleFreeTrial = async () => {
-    if (!isSuperAdmin) {
-      showToast?.('Only Super Admin can change free trial.');
-      return;
-    }
-    setTrialSaving(true);
-    try {
-      await saveFreeTrial({
-        enabled: !freeTrialEnabled,
-        days: Number(trialDaysDraft) || freeTrialDays || 14
-      });
-    } finally {
-      setTrialSaving(false);
-    }
-  };
-
-  const saveTrialDays = async () => {
-    if (!isSuperAdmin) {
-      showToast?.('Only Super Admin can change free trial.');
-      return;
-    }
-    const days = Number(trialDaysDraft);
-    if (!Number.isFinite(days) || days < 1 || days > 90) {
-      showToast?.('Trial days must be between 1 and 90.');
-      return;
-    }
-    setTrialSaving(true);
-    try {
-      await saveFreeTrial({ enabled: freeTrialEnabled, days });
-    } finally {
-      setTrialSaving(false);
-    }
-  };
-
   const toggleEnabled = async (plan) => {
     await updatePlan(plan.id, { ...plan, enabled: !(plan.enabled !== false) });
   };
@@ -92,19 +49,10 @@ export default function Plans() {
     <div className="space-y-6">
       <PageHeader
         title="Plans"
-        description="Membership pricing, trial settings, and feature access."
+        description="Membership pricing and feature access. New signups must buy a plan."
         icon={Sliders}
         actions={
           <>
-            <button
-              type="button"
-              disabled={trialSaving || !isSuperAdmin}
-              onClick={toggleFreeTrial}
-              className={`admin-btn-secondary ${freeTrialEnabled ? 'border-emerald-700 text-emerald-300' : ''}`}
-            >
-              <Gift className="h-3.5 w-3.5" />
-              Trial {freeTrialEnabled ? 'ON' : 'OFF'}
-            </button>
             <button
               type="button"
               disabled={byokSaving || !isSuperAdmin}
@@ -123,35 +71,6 @@ export default function Plans() {
           </>
         }
       />
-
-      <Panel className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="text-sm font-semibold text-white">Free trial for new signups</div>
-          <p className="mt-1 text-xs text-admin-muted">
-            Default is OFF. Existing users are not changed when you toggle this.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-[10px] uppercase tracking-wider text-admin-muted">Days</label>
-          <input
-            type="number"
-            min={1}
-            max={90}
-            disabled={!isSuperAdmin || trialSaving}
-            value={trialDaysDraft}
-            onChange={(e) => setTrialDaysDraft(e.target.value)}
-            className="admin-input w-20 font-mono"
-          />
-          <button
-            type="button"
-            disabled={!isSuperAdmin || trialSaving}
-            onClick={saveTrialDays}
-            className="admin-btn-secondary"
-          >
-            Save
-          </button>
-        </div>
-      </Panel>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {sortedPlans.map((plan) => {

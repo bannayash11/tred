@@ -177,6 +177,12 @@ class ByokUserSession {
           stock.smcData = smcEngine.analyze(filtered, stock.symbol, '5m');
           stock.high = Math.max(...filtered.map((c) => c.high));
           stock.low = Math.min(...filtered.map((c) => c.low));
+          stock.chartCache = {
+            key: '5m:5',
+            candles: filtered,
+            smcData: stock.smcData,
+            fetchedAt: Date.now()
+          };
         } catch {
           /* continue */
         }
@@ -200,16 +206,36 @@ class ByokUserSession {
     let smcData = null;
     let dataSource = 'unavailable';
 
-    const cacheHit =
-      stock.chartCache?.key === cacheKey &&
-      stock.chartCache.candles?.length &&
+    const cacheFresh =
+      stock.chartCache?.candles?.length &&
       Date.now() - (stock.chartCache.fetchedAt || 0) < CHART_CACHE_TTL_MS;
+    const cacheHit = cacheFresh && stock.chartCache.key === cacheKey;
+    const softCacheHit =
+      !cacheHit &&
+      cacheFresh &&
+      String(stock.chartCache.key || '').startsWith(`${timeframe}:`);
 
-    if (cacheHit) {
+    if (cacheHit || softCacheHit) {
       candles = stock.chartCache.candles;
       smcData = stock.chartCache.smcData;
       dataSource = 'live';
-    } else {
+    } else if (
+      timeframe === '5m' &&
+      Array.isArray(stock.candles) &&
+      stock.candles.length > 0
+    ) {
+      candles = stock.candles;
+      smcData = stock.smcData || smcEngine.analyze(candles, stock.symbol, timeframe);
+      dataSource = 'live';
+      stock.chartCache = {
+        key: cacheKey,
+        candles,
+        smcData,
+        fetchedAt: Date.now()
+      };
+    }
+
+    if (!candles.length) {
       const inflightKey = `${stock.symbol}|${cacheKey}`;
       let p = this._historyInflight.get(inflightKey);
       if (!p) {

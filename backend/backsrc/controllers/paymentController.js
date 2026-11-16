@@ -4,6 +4,7 @@ import { Payment } from '../models/Payment.js';
 import { User } from '../models/User.js';
 import {
   findPlanById,
+  findPlanByName,
   getByokSalesEnabled,
   getRazorpayPaymentsEnabled,
   getUtrPaymentsEnabled,
@@ -469,7 +470,7 @@ export const approveUtrPayment = async (req, res) => {
     } catch (actErr) {
       console.error('[Payment] UTR approve activation failed:', actErr);
       return res.status(actErr.statusCode || 500).json({
-        success: true,
+        success: false,
         paymentApproved: true,
         membershipActivated: false,
         message:
@@ -479,13 +480,23 @@ export const approveUtrPayment = async (req, res) => {
       });
     }
 
+    if (!activation.activated) {
+      return res.status(500).json({
+        success: false,
+        paymentApproved: true,
+        membershipActivated: false,
+        message:
+          activation.message ||
+          'UTR marked paid but membership was not activated. Check planId/userId.',
+        payment: toPublicPayment(payment)
+      });
+    }
+
     return res.json({
       success: true,
       paymentApproved: true,
-      membershipActivated: !!activation.activated,
-      message: activation.activated
-        ? 'UTR verified. Membership activated.'
-        : 'UTR marked paid.',
+      membershipActivated: true,
+      message: 'UTR verified. Membership activated.',
       payment: toPublicPayment(payment),
       user: activation.user || null
     });
@@ -641,7 +652,7 @@ export const verifyPayment = async (req, res) => {
     } catch (actErr) {
       console.error('[Payment] membership activation after verify failed:', actErr);
       return res.status(actErr.statusCode || 500).json({
-        success: true,
+        success: false,
         paymentVerified: true,
         membershipActivated: false,
         message:
@@ -652,12 +663,14 @@ export const verifyPayment = async (req, res) => {
       });
     }
 
-    if (!activation.activated && activation.reason === 'byok_credentials_required') {
-      return res.json({
-        success: true,
+    if (!activation.activated) {
+      return res.status(500).json({
+        success: false,
         paymentVerified: true,
         membershipActivated: false,
-        message: activation.message,
+        message:
+          activation.message ||
+          'Payment verified but membership was not activated. Contact support with your Order ID.',
         payment: toPublicPayment(payment),
         orderId: payment.orderId
       });
@@ -666,10 +679,8 @@ export const verifyPayment = async (req, res) => {
     return res.json({
       success: true,
       paymentVerified: true,
-      membershipActivated: !!activation.activated,
-      message: activation.activated
-        ? 'Payment confirmed. Membership is now active.'
-        : 'Payment verified successfully.',
+      membershipActivated: true,
+      message: 'Payment confirmed. Membership is now active.',
       payment: toPublicPayment(payment),
       user: activation.user || null
     });
@@ -958,6 +969,25 @@ export const importAdminPayments = async (req, res) => {
       const gatewayRaw = String(row.gateway || 'razorpay').trim().toLowerCase();
       const gateway = ['razorpay', 'utr'].includes(gatewayRaw) ? gatewayRaw : 'razorpay';
 
+      const email = String(row.customerEmail || row.email || '')
+        .trim()
+        .toLowerCase();
+      let userId = row.userId || null;
+      if (!userId && email) {
+        try {
+          const matchedUser = await User.findOne({ email }).select('_id');
+          if (matchedUser) userId = matchedUser._id;
+        } catch {
+          /* ignore lookup errors */
+        }
+      }
+
+      let planId = row.planId ? String(row.planId).trim() : null;
+      const planName = row.planName ? String(row.planName).trim() : null;
+      if (!planId && planName) {
+        planId = findPlanByName(planName)?.id || null;
+      }
+
       const payload = {
         orderId,
         amount,
@@ -969,30 +999,55 @@ export const importAdminPayments = async (req, res) => {
         utr: row.utr ? String(row.utr).trim().toUpperCase() : null,
         failureReason: row.failureReason ? String(row.failureReason).trim() : null,
         adminNote: row.adminNote ? String(row.adminNote).trim() : null,
-        planId: row.planId ? String(row.planId).trim() : null,
-        planName: row.planName ? String(row.planName).trim() : null,
-        membershipActivated:
-          row.membershipActivated === true ||
-          String(row.membershipActivated || '').toLowerCase() === 'true' ||
-          String(row.membershipActivated || '') === '1',
+        planId,
+        planName,
+        userId: userId || null,
+        membershipActivated: false,
         customerDetails: {
           name: String(row.customerName || row.name || '').trim(),
-          email: String(row.customerEmail || row.email || '')
-            .trim()
-            .toLowerCase(),
+          email,
           phone: String(row.customerPhone || row.phone || '').trim()
         }
       };
 
       try {
-        const existing = await Payment.findOne({ orderId });
-        if (existing) {
-          Object.assign(existing, payload);
-          await existing.save();
+        let doc = await Payment.findOne({ orderId });
+        if (doc) {
+          const wasActivated = !!doc.membershipActivated;
+          Object.assign(doc, payload);
+          if (wasActivated) doc.membershipActivated = true;
+          await doc.save();
           updated += 1;
         } else {
-          await Payment.create(payload);
+          doc = await Payment.create(payload);
           created += 1;
+        }
+
+        if (status === 'paid' && !doc.membershipActivated && doc.userId && doc.planId) {
+          try {
+            const activation = await activateMembershipFromPayment(doc);
+            if (activation.activated) {
+              doc.membershipActivated = true;
+            }
+          } catch (actErr) {
+            errors.push({
+              row: i + 1,
+              orderId,
+              message: `Saved paid row but activation failed: ${actErr.message || actErr}`
+            });
+          }
+        } else if (status === 'paid' && !doc.userId) {
+          errors.push({
+            row: i + 1,
+            orderId,
+            message: 'Paid row saved but no userId/email match — membership not activated.'
+          });
+        } else if (status === 'paid' && !doc.planId) {
+          errors.push({
+            row: i + 1,
+            orderId,
+            message: 'Paid row saved but planId/planName missing — membership not activated.'
+          });
         }
       } catch (err) {
         skipped += 1;
@@ -1084,7 +1139,7 @@ export const cancelMembership = async (req, res) => {
       if (!user) {
         return res.status(404).json({ success: false, message: 'User not found.' });
       }
-      if (user.subscription?.status !== 'active' && user.subscription?.status !== 'trial') {
+      if (user.subscription?.status !== 'active') {
         return res.status(400).json({
           success: false,
           message: 'No active membership to cancel.'

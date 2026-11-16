@@ -41,9 +41,6 @@ function StatusBadge({ user }) {
   if (user.subscription?.status === 'active') {
     return <span className="admin-chip border-emerald-800/50 bg-emerald-950/60 text-emerald-300">Active</span>;
   }
-  if (user.subscription?.status === 'trial') {
-    return <span className="admin-chip border-amber-800/50 bg-amber-950/60 text-amber-300">Trial</span>;
-  }
   return <span className="admin-chip border-admin-border bg-admin-bg text-admin-muted">Inactive</span>;
 }
 
@@ -167,14 +164,12 @@ export default function Traders() {
   const traderStats = useMemo(() => {
     const now = Date.now();
     let active = 0;
-    let trial = 0;
     for (const u of traders) {
       const status = u.subscription?.status;
       const exp = u.subscription?.expiresAt ? new Date(u.subscription.expiresAt).getTime() : 0;
       if (status === 'active' && exp > now) active += 1;
-      if (status === 'trial' && exp > now) trial += 1;
     }
-    return { total: traders.length, active, trial };
+    return { total: traders.length, active };
   }, [traders]);
 
   const handleExport = () => {
@@ -293,7 +288,7 @@ export default function Traders() {
       </div>
 
       {tab === 'traders' ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Panel className="p-4">
             <div className="text-xs text-admin-muted">Total traders</div>
             <div className="mt-1 font-mono text-2xl font-semibold text-white">{traderStats.total}</div>
@@ -303,10 +298,6 @@ export default function Traders() {
             <div className="mt-1 font-mono text-2xl font-semibold text-admin-success">
               {traderStats.active}
             </div>
-          </Panel>
-          <Panel className="p-4">
-            <div className="text-xs text-admin-muted">Trials</div>
-            <div className="mt-1 font-mono text-2xl font-semibold text-admin-warn">{traderStats.trial}</div>
           </Panel>
           <Panel className="p-4">
             <div className="text-xs text-admin-muted">Est. MRR</div>

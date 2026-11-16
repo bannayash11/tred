@@ -1055,14 +1055,13 @@ export default function MembershipCheckout() {
                     onSuccess={({
                       user,
                       membershipActivated,
-                      paymentVerified,
                       autoApproved,
                       payment,
                       orderId
                     }) => {
                       if (user) dispatch(updateUser(user));
                       setFormError('');
-                      if (autoApproved || membershipActivated || paymentVerified) {
+                      if (autoApproved || membershipActivated) {
                         if (isByok) {
                           setAwaitingByok(true);
                           setReadyToPay(false);
@@ -1096,29 +1095,24 @@ export default function MembershipCheckout() {
                     customerDetails={customerDetails}
                     description={plan.name}
                     buttonLabel={`Pay ₹${finalPrice.toLocaleString('en-IN')} with Razorpay`}
-                    onSuccess={({ user, membershipActivated, paymentVerified }) => {
+                    onSuccess={({ user, membershipActivated }) => {
                       if (user) dispatch(updateUser(user));
                       setFormError('');
+                      if (!membershipActivated) {
+                        setFormError(
+                          'Payment received but membership was not activated. Contact support with your Order ID.'
+                        );
+                        return;
+                      }
                       if (isByok) {
                         setAwaitingByok(true);
                         setReadyToPay(false);
                         return;
                       }
-                      if (membershipActivated || paymentVerified) {
-                        setSuccess(true);
-                        setTimeout(() => navigate('/terminal'), 1200);
-                      }
+                      setSuccess(true);
+                      setTimeout(() => navigate('/terminal'), 1200);
                     }}
                     onFailure={(err) => {
-                      const raw = String(err?.userMessage || err?.message || err?.description || '');
-                      if (/payment (received|confirmed|verified)/i.test(raw) && /membership/i.test(raw)) {
-                        if (isByok) {
-                          setAwaitingByok(true);
-                          setReadyToPay(false);
-                          setFormError('');
-                          return;
-                        }
-                      }
                       setFormError(
                         toErrorText(
                           err?.userMessage || err?.message || err?.description || err,
