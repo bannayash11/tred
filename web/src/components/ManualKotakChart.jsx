@@ -322,6 +322,7 @@ export default function ManualKotakChart({
   seriesRef,
   currentCandleRef,
   asPage = false,
+  fillContainer = false,
   overlays = DEFAULT_CHART_OVERLAYS
 }) {
   const containerRef = useRef(null);
@@ -347,9 +348,12 @@ export default function ManualKotakChart({
     }
 
     const container = containerRef.current;
+    const initialH = fillContainer
+      ? Math.max(220, container.clientHeight || 0)
+      : Math.max(asPage ? 560 : 480, container.clientHeight || 0);
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: Math.max(asPage ? 560 : 480, container.clientHeight || 0),
+      height: initialH,
       layout: {
         background: { color: '#090d16' },
         textColor: '#94a3b8'
@@ -554,15 +558,28 @@ export default function ManualKotakChart({
 
     candleSeries.setMarkers(markers);
 
-    const handleResize = () => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-      }
+    const syncSize = () => {
+      if (!containerRef.current || !chartRef.current) return;
+      const el = containerRef.current;
+      chartRef.current.applyOptions({
+        width: el.clientWidth,
+        height: fillContainer
+          ? Math.max(220, el.clientHeight || 0)
+          : Math.max(asPage ? 560 : 480, el.clientHeight || 0)
+      });
     };
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', syncSize);
+    window.addEventListener('orientationchange', syncSize);
+    let ro;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => syncSize());
+      ro.observe(container);
+    }
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', syncSize);
+      window.removeEventListener('orientationchange', syncSize);
+      ro?.disconnect();
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -570,17 +587,26 @@ export default function ManualKotakChart({
       if (seriesRef) seriesRef.current = null;
       if (currentCandleRef) currentCandleRef.current = null;
     };
-  }, [stockData, timeframe, asPage, seriesRef, currentCandleRef, overlayKey]);
+  }, [stockData, timeframe, asPage, fillContainer, seriesRef, currentCandleRef, overlayKey]);
 
   // Full-page ChartFullLoader covers the site; keep a quiet placeholder here.
   if (loading) {
-    return <div className="min-h-[24rem] w-full flex-1 bg-[#090d16]" aria-hidden />;
+    return (
+      <div
+        className={`w-full flex-1 bg-[#090d16] ${fillContainer ? 'h-full min-h-0' : 'min-h-[24rem]'}`}
+        aria-hidden
+      />
+    );
   }
 
   // Prefer rendering candles even if a soft warning was set (list already had data).
   if (!stockData?.candles?.length) {
     return (
-      <div className="flex h-full min-h-[24rem] flex-col items-center justify-center gap-2 px-6 text-center">
+      <div
+        className={`flex w-full flex-col items-center justify-center gap-2 px-6 text-center ${
+          fillContainer ? 'h-full min-h-0' : 'h-full min-h-[24rem]'
+        }`}
+      >
         <span className="text-sm font-semibold text-slate-300">No chart data</span>
         <span className="max-w-md text-xs text-slate-500">
           {error || 'Chart data unavailable — wait for your broker feed or try again.'}
@@ -590,8 +616,15 @@ export default function ManualKotakChart({
   }
 
   return (
-    <div className="flex h-full min-h-[24rem] w-full flex-col">
-      <div ref={containerRef} className="min-h-[24rem] w-full flex-1 rounded-lg border border-slate-800/50" />
+    <div
+      className={`flex w-full flex-col ${fillContainer ? 'h-full min-h-0' : 'h-full min-h-[24rem]'}`}
+    >
+      <div
+        ref={containerRef}
+        className={`w-full flex-1 rounded-lg border border-slate-800/50 ${
+          fillContainer ? 'h-full min-h-0' : 'min-h-[24rem]'
+        }`}
+      />
     </div>
   );
 }

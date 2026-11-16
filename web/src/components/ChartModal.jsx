@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { X, TrendingUp, TrendingDown, Target, Layers, ArrowLeft } from 'lucide-react';
+import {
+  X,
+  TrendingUp,
+  TrendingDown,
+  Target,
+  Layers,
+  ArrowLeft,
+  Smartphone,
+  Monitor
+} from 'lucide-react';
 import { fetchStock, getSocket } from '../services/api';
 import { getMembership } from '../lib/membership';
 import { fetchByokClientStock, isByokChartUser } from '../lib/byokClientChart';
@@ -32,6 +41,50 @@ const RANGE_OPTIONS = [
 const IST_TZ = 'Asia/Kolkata';
 const NSE_OPEN_MINS = 9 * 60 + 15;
 const NSE_CLOSE_MINS = 15 * 60 + 30;
+const CHART_LAYOUT_KEY = 'tred_chart_layout_mode';
+
+/** auto = portrait mobile / landscape desktop; or force mobile|desktop */
+function readLayoutMode() {
+  try {
+    const v = sessionStorage.getItem(CHART_LAYOUT_KEY);
+    if (v === 'mobile' || v === 'desktop' || v === 'auto') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'auto';
+}
+
+function useViewportLayout(layoutMode) {
+  const [isLandscape, setIsLandscape] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia('(orientation: landscape)').matches
+      : false
+  );
+  const [isWide, setIsWide] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true
+  );
+
+  useEffect(() => {
+    const land = window.matchMedia('(orientation: landscape)');
+    const wide = window.matchMedia('(min-width: 1024px)');
+    const sync = () => {
+      setIsLandscape(land.matches);
+      setIsWide(wide.matches);
+    };
+    sync();
+    land.addEventListener('change', sync);
+    wide.addEventListener('change', sync);
+    return () => {
+      land.removeEventListener('change', sync);
+      wide.removeEventListener('change', sync);
+    };
+  }, []);
+
+  const useDesktopLayout =
+    layoutMode === 'desktop' || (layoutMode === 'auto' && (isWide || isLandscape));
+
+  return { isLandscape, isWide, useDesktopLayout };
+}
 
 
 function getIstParts(unixSec) {
@@ -82,6 +135,17 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   );
   const [overlays, setOverlays] = useState(() => loadSavedOverlays());
   const [rangeKey, setRangeKey] = useState('5D');
+  const [layoutMode, setLayoutMode] = useState(readLayoutMode);
+  const { useDesktopLayout } = useViewportLayout(layoutMode);
+
+  const setLayoutModePersist = (mode) => {
+    setLayoutMode(mode);
+    try {
+      sessionStorage.setItem(CHART_LAYOUT_KEY, mode);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const toggleOverlay = (key) => {
     setOverlays((prev) => {
@@ -274,8 +338,16 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const currentDisplayChange = liveChange ?? stockData?.change;
 
   const shellClass = asPage
-    ? 'relative flex min-h-[calc(100vh-11rem)] w-full flex-col rounded-2xl sm:rounded-3xl border border-slate-800 bg-[#0a0f1d] shadow-xl overflow-hidden'
-    : 'relative flex h-[100dvh] sm:h-[90vh] w-full max-w-6xl flex-col rounded-none sm:rounded-3xl border-0 sm:border border-slate-800 bg-[#0a0f1d] shadow-2xl overflow-hidden';
+    ? `relative flex w-full flex-col rounded-2xl sm:rounded-3xl border border-slate-800 bg-[#0a0f1d] shadow-xl ${
+        useDesktopLayout
+          ? 'min-h-[calc(100vh-11rem)] overflow-hidden'
+          : 'min-h-0 overflow-x-hidden overflow-y-auto'
+      }`
+    : `relative flex w-full max-w-6xl flex-col border-slate-800 bg-[#0a0f1d] shadow-2xl overflow-hidden ${
+        useDesktopLayout
+          ? 'h-[100dvh] sm:h-[90vh] rounded-none sm:rounded-3xl border-0 sm:border'
+          : 'h-[100dvh] max-h-[100dvh] rounded-none border-0'
+      }`;
 
   const content = (
       <div className={shellClass}>
@@ -283,8 +355,8 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
           <ChartFullLoader symbol={symbol} timeframe={timeframe} rangeKey={rangeKey} />
         ) : null}
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 px-4 sm:px-6 py-4 bg-slate-900/50">
-          <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 px-3 sm:px-6 py-3 sm:py-4 bg-slate-900/50">
+          <div className="flex items-center space-x-2 sm:space-x-4 min-w-0 flex-1">
             {asPage && (
               <button
                 type="button"
@@ -296,21 +368,27 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               </button>
             )}
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-extrabold text-white">{symbol}</h2>
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h2 className="text-lg sm:text-xl font-extrabold text-white truncate max-w-[9rem] sm:max-w-none">
+                  {symbol}
+                </h2>
                 <span
-                  className="rounded bg-slate-900 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-300 border border-slate-700/80"
+                  className="hidden sm:inline rounded bg-slate-900 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-300 border border-slate-700/80"
                   title="NSE symbol"
                 >
                   {`NSE:${String(symbol || '').replace(/\s+/g, '')}`}
                 </span>
-                <span className="rounded bg-cyan-950 px-2 py-0.5 text-xs font-semibold text-cyan-400 border border-cyan-800/50">
-                  {stockData?.sector || 'NSE F&O'}
+                {useDesktopLayout && (
+                  <span className="rounded bg-cyan-950 px-2 py-0.5 text-xs font-semibold text-cyan-400 border border-cyan-800/50">
+                    {stockData?.sector || 'NSE F&O'}
+                  </span>
+                )}
+                <span className="text-[10px] sm:text-xs text-slate-400">
+                  {timeframe.toUpperCase()} · {rangeKey}
                 </span>
-                <span className="text-xs text-slate-400">{timeframe.toUpperCase()} · {rangeKey}</span>
                 {stockData?.dataSource === 'live' && (
                   <span className="rounded bg-emerald-950/80 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-800/50">
-                    LIVE DATA
+                    LIVE
                   </span>
                 )}
                 {stockData?.chartProvider === 'upstox' && (
@@ -322,7 +400,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               <p className="text-xs text-slate-400 truncate">{stockData?.name}</p>
             </div>
 
-            {stockData && currentDisplayPrice !== undefined && (
+            {stockData && currentDisplayPrice !== undefined && useDesktopLayout && (
               <div className="hidden md:flex items-center space-x-3 border-l border-slate-800 pl-4">
                 <div
                   className={`flex items-baseline space-x-2 rounded-xl px-3 py-1 transition-colors duration-300 ${
@@ -368,10 +446,9 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Mobile price */}
-            {stockData && currentDisplayPrice !== undefined && (
-              <div className="flex md:hidden items-baseline gap-1.5 font-mono">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {stockData && currentDisplayPrice !== undefined && !useDesktopLayout && (
+              <div className="flex items-baseline gap-1.5 font-mono">
                 <span className="text-sm font-bold text-white">
                   ₹{Number(currentDisplayPrice).toLocaleString('en-IN', {
                     maximumFractionDigits: 2
@@ -387,6 +464,42 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                 </span>
               </div>
             )}
+            {/* Mobile layout picker: portrait=mobile UI, landscape=desktop UI (or force) */}
+            <div
+              className="flex items-center rounded-lg border border-slate-700/80 bg-slate-900/80 p-0.5 lg:hidden"
+              title="Layout: Auto follows orientation"
+            >
+              <button
+                type="button"
+                onClick={() => setLayoutModePersist('mobile')}
+                className={`rounded-md p-1.5 ${
+                  layoutMode === 'mobile' ? 'bg-cyan-500 text-black' : 'text-slate-400'
+                }`}
+                aria-label="Mobile layout"
+              >
+                <Smartphone className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayoutModePersist('auto')}
+                className={`rounded-md px-1.5 py-1 text-[9px] font-bold uppercase tracking-wide ${
+                  layoutMode === 'auto' ? 'bg-amber-500 text-black' : 'text-slate-500'
+                }`}
+                aria-label="Auto layout"
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayoutModePersist('desktop')}
+                className={`rounded-md p-1.5 ${
+                  layoutMode === 'desktop' ? 'bg-cyan-500 text-black' : 'text-slate-400'
+                }`}
+                aria-label="Desktop layout"
+              >
+                <Monitor className="h-3.5 w-3.5" />
+              </button>
+            </div>
             {!asPage && (
               <button
                 type="button"
@@ -401,7 +514,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
         </div>
 
         {/* Toolbar */}
-        <div className="space-y-2 border-b border-slate-800/80 px-4 sm:px-5 py-2.5 bg-slate-950/70">
+        <div className="shrink-0 space-y-2 border-b border-slate-800/80 px-3 sm:px-5 py-2 sm:py-2.5 bg-slate-950/70">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="hidden sm:inline text-[10px] text-slate-500">
@@ -466,10 +579,20 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col lg:flex-row overflow-hidden min-h-[28rem]">
+        <div
+          className={`flex flex-1 min-h-0 ${
+            useDesktopLayout
+              ? 'flex-row overflow-hidden'
+              : 'flex-col overflow-y-auto overflow-x-hidden'
+          }`}
+        >
           <div
-            className={`relative flex-1 bg-[#090d16] p-2 sm:p-4 flex flex-col justify-center ${
-              asPage ? 'min-h-[28rem] lg:min-h-[32rem]' : ''
+            className={`relative flex-1 min-w-0 min-h-0 bg-[#090d16] p-2 sm:p-4 flex flex-col ${
+              useDesktopLayout
+                ? 'h-full'
+                : asPage
+                  ? 'min-h-[55vh]'
+                  : 'min-h-[42vh] max-h-[52vh] shrink-0'
             }`}
           >
             <ManualKotakChart
@@ -479,12 +602,19 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               error={fetchError}
               seriesRef={seriesRef}
               currentCandleRef={currentCandleRef}
-              asPage={asPage}
+              asPage={asPage || useDesktopLayout}
               overlays={overlays}
+              fillContainer
             />
           </div>
 
-          <div className="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-slate-800/70 bg-[#0a0f18] px-3.5 py-3.5 overflow-y-auto space-y-3">
+          <div
+            className={`border-slate-800/70 bg-[#0a0f18] px-3.5 py-3.5 space-y-3 ${
+              useDesktopLayout
+                ? 'w-72 xl:w-80 shrink-0 border-l overflow-y-auto h-full'
+                : 'w-full border-t overflow-visible'
+            }`}
+          >
             <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-3 py-2">
               <h3 className="text-[11px] font-semibold text-slate-200">Structure &amp; Levels</h3>
               <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
@@ -656,7 +786,11 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   if (asPage) return content;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-black/80 p-0 sm:p-4 backdrop-blur-md">
+    <div
+      className={`fixed inset-0 z-50 flex justify-center bg-black/80 backdrop-blur-md ${
+        useDesktopLayout ? 'items-stretch sm:items-center p-0 sm:p-4' : 'items-stretch p-0'
+      }`}
+    >
       {content}
     </div>
   );
