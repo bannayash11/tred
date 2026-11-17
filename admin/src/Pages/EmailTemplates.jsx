@@ -26,7 +26,7 @@ const emptySmtp = () => ({
 export default function EmailTemplates() {
   const { adminUser, showToast } = useAdmin();
   const isSuperAdmin = adminUser?.role === 'admin';
-  const [tab, setTab] = useState('smtp');
+  const [tab, setTab] = useState('templates');
   const [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(false);
 
@@ -214,7 +214,7 @@ export default function EmailTemplates() {
     <div className="space-y-6">
       <PageHeader
         title="Email Templates"
-        description="SMTP mail settings + dynamic templates for signup verify, forgot password, and login OTP."
+        description="Edit signup, login/2FA, and forgot-password OTP emails (subject + body). SMTP settings are under Mail settings."
         icon={Mail}
       />
 
@@ -289,7 +289,7 @@ export default function EmailTemplates() {
                     type="text"
                     value={smtp.host}
                     onChange={(e) => onSmtpChange('host', e.target.value)}
-                    placeholder="smtp.gmail.com"
+                    placeholder="SMTP host"
                     className="admin-input"
                     required
                   />

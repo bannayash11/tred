@@ -43,7 +43,7 @@ import {
   persistEmailTemplates,
   getTemplateVariableHelp,
   renderTemplateString
-} from '../services/emailService.js';
+} from '../services/platformEmailService.js';
 import {
   getSocialMediaAdmin,
   getPublicSocialMedia,

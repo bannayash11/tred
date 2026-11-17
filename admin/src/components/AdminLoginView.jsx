@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { Lock, Mail, KeyRound, AlertCircle, ArrowRight } from 'lucide-react';
+import { Lock, Mail, AlertCircle, ArrowRight } from 'lucide-react';
 import { api } from '../services/api';
 import Panel from './ui/Panel';
+import OtpInputBoxes from './OtpInputBoxes';
+import { OTP_DIGITS, OTP_RESEND_COOLDOWN_SEC, isCompleteOtp } from '../lib/otp';
+import useOtpCooldown from '../hooks/useOtpCooldown';
 
 export default function AdminLoginView({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
@@ -10,12 +13,15 @@ export default function AdminLoginView({ onLoginSuccess }) {
   const [error, setError] = useState('');
   const [requires2fa, setRequires2fa] = useState(false);
   const [otpCode, setOtpCode] = useState('');
+  const [otpResending, setOtpResending] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [recoveryStep, setRecoveryStep] = useState(1);
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [recoveryNotice, setRecoveryNotice] = useState('');
+  const authOtpCooldown = useOtpCooldown(0);
+  const recoveryOtpCooldown = useOtpCooldown(0);
 
   const handleAdminLogin = async (e) => {
     e.preventDefault();
@@ -43,6 +49,7 @@ export default function AdminLoginView({ onLoginSuccess }) {
 
       if (res.data.success && res.data.requires2fa) {
         setRequires2fa(true);
+        authOtpCooldown.start(res.data.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
         return;
       }
 
@@ -54,9 +61,34 @@ export default function AdminLoginView({ onLoginSuccess }) {
         setError(res.data.message || 'Invalid email or password.');
       }
     } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) authOtpCooldown.start(retry);
       setError(err.userMessage || err.response?.data?.message || 'Invalid email or password.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendAuthOtp = async () => {
+    if (authOtpCooldown.active || otpResending) return;
+    setOtpResending(true);
+    setError('');
+    try {
+      const res = await api.post('/auth/resend-2fa', {
+        email: String(email || '').trim().toLowerCase()
+      });
+      if (res.data.success) {
+        if (res.data.otp) setOtpCode(res.data.otp);
+        authOtpCooldown.start(res.data.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
+      } else {
+        setError(res.data.message || 'Could not resend OTP.');
+      }
+    } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) authOtpCooldown.start(retry);
+      setError(err.userMessage || err.response?.data?.message || 'Could not resend OTP.');
+    } finally {
+      setOtpResending(false);
     }
   };
 
@@ -75,17 +107,39 @@ export default function AdminLoginView({ onLoginSuccess }) {
         setRecoveryNotice(res.data.message || 'If that account exists, an OTP was emailed.');
         if (res.data.otp) setRecoveryCode(res.data.otp);
         setRecoveryStep(2);
+        recoveryOtpCooldown.start(res.data.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
       }
     } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) recoveryOtpCooldown.start(retry);
       setError(err.userMessage || err.response?.data?.message || 'Could not send recovery code.');
+    }
+  };
+
+  const handleResendRecoveryOtp = async () => {
+    if (recoveryOtpCooldown.active) return;
+    setError('');
+    try {
+      const res = await api.post('/auth/forgot-password', {
+        email: String(forgotEmail || '').trim().toLowerCase()
+      });
+      if (res.data.success) {
+        setRecoveryNotice(res.data.message || 'OTP resent to your email.');
+        if (res.data.otp) setRecoveryCode(res.data.otp);
+        recoveryOtpCooldown.start(res.data.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
+      }
+    } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) recoveryOtpCooldown.start(retry);
+      setError(err.userMessage || err.response?.data?.message || 'Could not resend OTP.');
     }
   };
 
   const handleResetPassword = async (e) => {
     e.preventDefault();
     setError('');
-    if (!String(recoveryCode || '').trim()) {
-      setError('Please enter the recovery OTP.');
+    if (!isCompleteOtp(recoveryCode)) {
+      setError(`Please enter the ${OTP_DIGITS}-digit recovery OTP.`);
       return;
     }
     if (!newPassword || newPassword.length < 6) {
@@ -135,34 +189,44 @@ export default function AdminLoginView({ onLoginSuccess }) {
         <form onSubmit={handleAdminLogin} className="space-y-4" noValidate>
           {requires2fa ? (
             <div>
-              <label className="admin-label">2FA code</label>
-              <div className="relative">
-                <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-muted" />
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  required
-                  maxLength={6}
-                  value={otpCode}
-                  onChange={(e) => {
-                    setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
-                    if (error) setError('');
-                  }}
-                  placeholder="6-digit OTP"
-                  className="admin-input pl-9 tracking-widest"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setRequires2fa(false);
-                  setOtpCode('');
-                  setError('');
+              <label className="admin-label">2FA code ({OTP_DIGITS} digits)</label>
+              <OtpInputBoxes
+                id="admin-2fa-otp"
+                value={otpCode}
+                length={OTP_DIGITS}
+                hasError={Boolean(error)}
+                ariaLabel="Admin 2FA code"
+                onChange={(next) => {
+                  setOtpCode(next);
+                  if (error) setError('');
                 }}
-                className="mt-2 text-xs text-admin-accent hover:underline"
-              >
-                Back to password
-              </button>
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={authOtpCooldown.active || otpResending}
+                  onClick={handleResendAuthOtp}
+                  className="text-xs text-admin-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+                >
+                  {otpResending
+                    ? 'Sending…'
+                    : authOtpCooldown.active
+                      ? `Resend OTP in ${authOtpCooldown.secondsLeft}s`
+                      : 'Resend OTP'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequires2fa(false);
+                    setOtpCode('');
+                    setError('');
+                    authOtpCooldown.clear();
+                  }}
+                  className="text-xs text-admin-accent hover:underline"
+                >
+                  Back to password
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -274,17 +338,28 @@ export default function AdminLoginView({ onLoginSuccess }) {
             ) : (
               <form onSubmit={handleResetPassword} className="space-y-3">
                 <div>
-                  <label className="admin-label">Recovery OTP</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    required
-                    maxLength={6}
+                  <label className="admin-label">Recovery OTP ({OTP_DIGITS} digits)</label>
+                  <OtpInputBoxes
+                    id="admin-recovery-otp"
                     value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="6-digit OTP"
-                    className="admin-input text-center font-mono tracking-widest"
+                    length={OTP_DIGITS}
+                    hasError={Boolean(error)}
+                    ariaLabel="Admin recovery OTP"
+                    onChange={(next) => {
+                      setRecoveryCode(next);
+                      if (error) setError('');
+                    }}
                   />
+                  <button
+                    type="button"
+                    disabled={recoveryOtpCooldown.active}
+                    onClick={handleResendRecoveryOtp}
+                    className="mt-2 text-xs text-admin-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+                  >
+                    {recoveryOtpCooldown.active
+                      ? `Resend OTP in ${recoveryOtpCooldown.secondsLeft}s`
+                      : 'Resend OTP'}
+                  </button>
                 </div>
                 <div>
                   <label className="admin-label">New password</label>

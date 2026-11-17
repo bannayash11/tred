@@ -34,7 +34,7 @@ import {
   loadPlansFromDb
 } from './services/membershipPlans.js';
 import { loadPlatformBrokerFromDb } from './services/platformBrokerService.js';
-import { loadSmtpSettingsFromDb, loadEmailTemplatesFromDb } from './services/emailService.js';
+import { loadSmtpSettingsFromDb, loadEmailTemplatesFromDb } from './services/platformEmailService.js';
 import { loadSocialMediaFromDb } from './services/socialMediaService.js';
 import jwt from 'jsonwebtoken';
 

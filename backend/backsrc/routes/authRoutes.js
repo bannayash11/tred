@@ -30,7 +30,7 @@ import {
   isSmtpReady,
   sendOtpEmail,
   shouldExposeOtpInApi
-} from '../services/emailService.js';
+} from '../services/platformEmailService.js';
 
 const router = express.Router();
 
@@ -89,11 +89,37 @@ const clientKey = (req, suffix) => {
 
 const OTP_DIGITS = 6;
 const OTP_TTL_MS = 10 * 60 * 1000;
+/** Minimum wait between OTP emails to the same address (signup / login / forgot). */
+const OTP_RESEND_COOLDOWN_MS = 30 * 1000;
+/** key -> last successful send timestamp */
+const otpLastSentAt = new Map();
 
-function otpApiPayload(message, otp) {
-  const payload = { success: true, message };
+function otpApiPayload(message, otp, extra = {}) {
+  const payload = { success: true, message, retryAfterSec: 30, ...extra };
   if (shouldExposeOtpInApi() && otp) payload.otp = otp;
   return payload;
+}
+
+function getOtpSendCooldown(key) {
+  const last = otpLastSentAt.get(key) || 0;
+  const retryAfterMs = Math.max(0, OTP_RESEND_COOLDOWN_MS - (Date.now() - last));
+  return {
+    allowed: retryAfterMs === 0,
+    retryAfterMs,
+    retryAfterSec: Math.ceil(retryAfterMs / 1000) || 0
+  };
+}
+
+function markOtpSent(key) {
+  otpLastSentAt.set(key, Date.now());
+}
+
+function otpCooldownResponse(retryAfterSec) {
+  return {
+    success: false,
+    message: `Please wait ${retryAfterSec}s before requesting another OTP.`,
+    retryAfterSec
+  };
 }
 
 async function issueAndSendOtp({ email, purpose, recipientName = '' }) {
@@ -110,13 +136,22 @@ async function issueAndSendOtp({ email, purpose, recipientName = '' }) {
   return code;
 }
 
-async function begin2faChallenge(user) {
+async function begin2faChallenge(user, { force = false } = {}) {
   const email = String(user.email).toLowerCase().trim();
+  const coolKey = `login:${email}`;
+  const cool = getOtpSendCooldown(coolKey);
+  const existing = pending2fa.get(email);
+
+  if (!force && !cool.allowed && existing && existing.expiresAt > Date.now()) {
+    return { email, sent: false, retryAfterSec: cool.retryAfterSec };
+  }
+
   const code = await issueAndSendOtp({
     email,
     purpose: 'login',
     recipientName: user.name || ''
   });
+  markOtpSent(coolKey);
   pending2fa.set(email, {
     codeHash: hashCode(code),
     expiresAt: Date.now() + OTP_TTL_MS,
@@ -127,7 +162,7 @@ async function begin2faChallenge(user) {
   if (shouldExposeOtpInApi()) {
     console.log(`[AUTH_DEBUG] 2FA OTP for ${email}: ${code}`);
   }
-  return email;
+  return { email, sent: true, retryAfterSec: 30, debugOtp: code };
 }
 
 async function emailAlreadyRegistered(normalizedEmail) {
@@ -190,10 +225,17 @@ router.post('/register/send-otp', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already registered.' });
     }
 
+    const coolKey = `signup:${normalizedEmail}`;
+    const cool = getOtpSendCooldown(coolKey);
+    if (!cool.allowed) {
+      return res.status(429).json(otpCooldownResponse(cool.retryAfterSec));
+    }
+
     const code = await issueAndSendOtp({
       email: normalizedEmail,
       purpose: 'signup'
     });
+    markOtpSent(coolKey);
 
     signupOtps.set(normalizedEmail, {
       codeHash: hashCode(code),
@@ -352,11 +394,13 @@ router.post('/login', async (req, res) => {
           });
         }
         if (mem.twoFactorEnabled) {
-          await begin2faChallenge(mem);
+          const challenge = await begin2faChallenge(mem);
           return res.json({
             success: true,
             requires2fa: true,
             email: normalizedEmail,
+            retryAfterSec: challenge.retryAfterSec || 30,
+            otpSent: challenge.sent !== false,
             message: 'Enter the 2FA verification code to finish signing in.'
           });
         }
@@ -393,11 +437,13 @@ router.post('/login', async (req, res) => {
       }
 
       if (user.twoFactorEnabled) {
-        await begin2faChallenge(user);
+        const challenge = await begin2faChallenge(user);
         return res.json({
           success: true,
           requires2fa: true,
           email: normalizedEmail,
+          retryAfterSec: challenge.retryAfterSec || 30,
+          otpSent: challenge.sent !== false,
           message: 'Enter the 2FA verification code to finish signing in.'
         });
       }
@@ -469,6 +515,57 @@ router.post('/verify-2fa', async (req, res) => {
   }
 });
 
+// Resend 2FA / login OTP (30s cooldown)
+router.post('/resend-2fa', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email address required.' });
+    }
+    const normalizedEmail = String(email).toLowerCase().trim();
+
+    const rate = checkRateLimit(clientKey(req, 'resend-2fa'), 10, 15 * 60 * 1000);
+    if (!rate.allowed) {
+      return res.status(429).json({ success: false, message: 'Too many OTP requests. Try again later.' });
+    }
+
+    const pending = pending2fa.get(normalizedEmail);
+    if (!pending || pending.expiresAt < Date.now()) {
+      pending2fa.delete(normalizedEmail);
+      return res.status(400).json({
+        success: false,
+        message: 'No active verification. Please sign in again.'
+      });
+    }
+
+    const cool = getOtpSendCooldown(`login:${normalizedEmail}`);
+    if (!cool.allowed) {
+      return res.status(429).json(otpCooldownResponse(cool.retryAfterSec));
+    }
+
+    let user = memoryUsers.get(pending.userId) || null;
+    if (!user) {
+      try {
+        user = await User.findById(pending.userId);
+      } catch {
+        return res.status(503).json({ success: false, message: 'Database unavailable.' });
+      }
+    }
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const challenge = await begin2faChallenge(user, { force: true });
+    return res.json(
+      otpApiPayload('A new verification code was sent to your email.', challenge.debugOtp, {
+        retryAfterSec: challenge.retryAfterSec || 30
+      })
+    );
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Dedicated Admin Login
 router.post('/admin-login', async (req, res) => {
   try {
@@ -512,11 +609,13 @@ router.post('/admin-login', async (req, res) => {
       }
 
       if (admin.twoFactorEnabled) {
-        await begin2faChallenge(admin);
+        const challenge = await begin2faChallenge(admin);
         return res.json({
           success: true,
           requires2fa: true,
           email: normalizedEmail,
+          retryAfterSec: challenge.retryAfterSec || 30,
+          otpSent: challenge.sent !== false,
           message: 'Enter the 2FA verification code to finish signing in.'
         });
       }
@@ -567,11 +666,17 @@ router.post('/forgot-password', async (req, res) => {
 
     let debugOtp = null;
     if (accountExists) {
+      const coolKey = `recovery:${normalizedEmail}`;
+      const cool = getOtpSendCooldown(coolKey);
+      if (!cool.allowed) {
+        return res.status(429).json(otpCooldownResponse(cool.retryAfterSec));
+      }
       try {
         const recoveryCode = await issueAndSendOtp({
           email: normalizedEmail,
           purpose: 'recovery'
         });
+        markOtpSent(coolKey);
         recoveryCodes.set(normalizedEmail, {
           codeHash: hashCode(recoveryCode),
           expiresAt: Date.now() + OTP_TTL_MS,
@@ -598,7 +703,55 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-// Reset Password with Verification Code
+// Verify recovery OTP before allowing password change
+router.post('/verify-recovery-otp', async (req, res) => {
+  try {
+    const rate = checkRateLimit(clientKey(req, 'verify-recovery'), 15, 15 * 60 * 1000);
+    if (!rate.allowed) {
+      return res.status(429).json({ success: false, message: 'Too many attempts. Try again later.' });
+    }
+
+    const { email, code } = req.body || {};
+    if (!email || !code) {
+      return res.status(400).json({ success: false, message: 'Email and OTP are required.' });
+    }
+
+    const normalizedEmail = String(email).toLowerCase().trim();
+    const emailRate = checkRateLimit(`verify-recovery:email:${normalizedEmail}`, 8, 15 * 60 * 1000);
+    if (!emailRate.allowed) {
+      return res.status(429).json({ success: false, message: 'Too many attempts for this email. Try again later.' });
+    }
+
+    const stored = recoveryCodes.get(normalizedEmail);
+    if (!stored || stored.expiresAt < Date.now()) {
+      recoveryCodes.delete(normalizedEmail);
+      return res.status(400).json({ success: false, message: 'Invalid or expired verification code.' });
+    }
+
+    stored.attempts = (stored.attempts || 0) + 1;
+    if (stored.attempts > 5) {
+      recoveryCodes.delete(normalizedEmail);
+      return res.status(429).json({ success: false, message: 'Too many invalid codes. Request a new one.' });
+    }
+
+    if (!timingSafeEqualHex(stored.codeHash, hashCode(code))) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired verification code.' });
+    }
+
+    stored.verified = true;
+    stored.attempts = 0;
+    recoveryCodes.set(normalizedEmail, stored);
+
+    return res.json({
+      success: true,
+      message: 'OTP verified. You can now set a new password.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Reset Password after OTP has been verified
 router.post('/reset-password', async (req, res) => {
   try {
     const rate = checkRateLimit(clientKey(req, 'reset'), 10, 15 * 60 * 1000);
@@ -622,10 +775,11 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid or expired verification code.' });
     }
 
-    stored.attempts = (stored.attempts || 0) + 1;
-    if (stored.attempts > 5) {
-      recoveryCodes.delete(normalizedEmail);
-      return res.status(429).json({ success: false, message: 'Too many invalid codes. Request a new one.' });
+    if (!stored.verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please verify the OTP before setting a new password.'
+      });
     }
 
     if (!timingSafeEqualHex(stored.codeHash, hashCode(code))) {

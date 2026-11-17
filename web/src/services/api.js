@@ -47,8 +47,10 @@ api.interceptors.response.use(
         !url.includes('/auth/register') &&
         !url.includes('/auth/admin-login') &&
         !url.includes('/auth/forgot-password') &&
+        !url.includes('/auth/verify-recovery-otp') &&
         !url.includes('/auth/reset-password') &&
-        !url.includes('/auth/verify-2fa')
+        !url.includes('/auth/verify-2fa') &&
+        !url.includes('/auth/resend-2fa')
       ) {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem('tred_auth_user');
@@ -157,7 +159,10 @@ export const registerSendOtpApi = (data) =>
   api.post('/auth/register/send-otp', data).then((res) => res.data);
 export const registerApi = (data) => api.post('/auth/register', data).then((res) => res.data);
 export const verify2faApi = (data) => api.post('/auth/verify-2fa', data).then((res) => res.data);
+export const resend2faApi = (data) => api.post('/auth/resend-2fa', data).then((res) => res.data);
 export const forgotPasswordApi = (data) => api.post('/auth/forgot-password', data).then((res) => res.data);
+export const verifyRecoveryOtpApi = (data) =>
+  api.post('/auth/verify-recovery-otp', data).then((res) => res.data);
 export const resetPasswordApi = (data) => api.post('/auth/reset-password', data).then((res) => res.data);
 export const updatePasswordApi = (data) => api.post('/auth/update-password', data).then((res) => res.data);
 export const toggle2FAApi = (data) => api.post('/auth/toggle-2fa', data).then((res) => res.data);

@@ -1,66 +1,251 @@
+/**
+ * Provider-agnostic Email & OTP service (Adapter / Strategy).
+ *
+ * Application code should only call the public helpers below.
+ * Swap EMAIL_PROVIDER (and related env vars) to change the transport —
+ * no call-site changes required.
+ *
+ * Supported providers:
+ * - smtp      → SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS
+ * - rest_api  → EMAIL_API_URL / EMAIL_API_KEY
+ */
+
+import 'dotenv/config';
 import nodemailer from 'nodemailer';
-import { Settings } from '../models/Settings.js';
-import { generateNumericCode } from '../utils/security.js';
 
-const SMTP_KEY = 'smtp_platform';
-const TEMPLATES_KEY = 'email_templates_platform';
-
-/** @type {null | object} */
-let smtpConfig = null;
-/** @type {null | Record<string, object>} */
-let templatesConfig = null;
-
-const TEMPLATE_META = {
-  signup_otp: {
-    label: 'Signup / Email verify OTP',
-    description: 'Sent when a new trader verifies email during registration.',
-    purpose: 'signup'
-  },
-  login_otp: {
-    label: 'Login 2FA OTP',
-    description: 'Sent when 2FA is enabled and user signs in.',
-    purpose: 'login'
-  },
-  recovery_otp: {
-    label: 'Forgot password OTP',
-    description: 'Sent for password reset / recovery.',
-    purpose: 'recovery'
-  },
-  smtp_test: {
-    label: 'SMTP test email',
-    description: 'Used when admin clicks Send test.',
-    purpose: 'test'
-  }
+const PROVIDERS = {
+  SMTP: 'smtp',
+  REST_API: 'rest_api'
 };
 
-function defaultShellHtml({ title, bodyHtml }) {
+function getConfig() {
+  const provider = String(process.env.EMAIL_PROVIDER || PROVIDERS.SMTP)
+    .trim()
+    .toLowerCase();
+
+  const fromAddress = String(
+    process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_FROM_EMAIL || ''
+  ).trim();
+  const fromName = String(
+    process.env.EMAIL_FROM_NAME || process.env.SMTP_FROM_NAME || 'Tradrift'
+  ).trim() || 'Tradrift';
+
+  return {
+    provider,
+    apiUrl: String(process.env.EMAIL_API_URL || '').trim(),
+    apiKey: String(process.env.EMAIL_API_KEY || '').trim(),
+    fromAddress,
+    fromName,
+    smtp: {
+      host: String(process.env.SMTP_HOST || '').trim(),
+      port: Number(process.env.SMTP_PORT || 465) || 465,
+      secure:
+        process.env.SMTP_SECURE === '1' ||
+        process.env.SMTP_SECURE === 'true' ||
+        Number(process.env.SMTP_PORT || 465) === 465,
+      user: String(process.env.SMTP_USER || '').trim(),
+      pass: String(process.env.SMTP_PASS || '')
+    }
+  };
+}
+
+function assertRestApiConfig(config) {
+  if (!config.apiUrl) {
+    throw new Error('EMAIL_API_URL is not configured.');
+  }
+  if (!config.apiKey) {
+    throw new Error('EMAIL_API_KEY is not configured.');
+  }
+  if (!config.fromAddress) {
+    throw new Error('EMAIL_FROM_ADDRESS is not configured.');
+  }
+}
+
+/**
+ * Provider-specific payload formatting (REST API).
+ * Isolated so other providers can add their own builders later.
+ * @private
+ */
+function buildRestApiPayload({ toEmail, toName, subject, htmlBody }, config) {
+  return {
+    from: {
+      address: config.fromAddress,
+      name: config.fromName
+    },
+    to: [
+      {
+        email_address: {
+          address: toEmail,
+          name: toName || ''
+        }
+      }
+    ],
+    subject,
+    htmlbody: htmlBody
+  };
+}
+
+/**
+ * @private
+ */
+async function sendViaRestApi({ toEmail, toName, subject, htmlBody }, config) {
+  assertRestApiConfig(config);
+
+  const payload = buildRestApiPayload(
+    { toEmail, toName, subject, htmlBody },
+    config
+  );
+
+  const response = await fetch(config.apiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: config.apiKey
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const rawText = await response.text();
+  let data = null;
+  try {
+    data = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    data = { raw: rawText };
+  }
+
+  if (!response.ok) {
+    const detail =
+      (data && (data.message || data.error || data.status)) ||
+      rawText ||
+      response.statusText;
+    throw new Error(`Email API request failed (${response.status}): ${detail}`);
+  }
+
+  return {
+    ok: true,
+    provider: PROVIDERS.REST_API,
+    status: response.status,
+    data
+  };
+}
+
+function assertSmtpConfig(config) {
+  if (!config.smtp.host) throw new Error('SMTP_HOST is not configured.');
+  if (!config.smtp.user) throw new Error('SMTP_USER is not configured.');
+  if (!config.smtp.pass) throw new Error('SMTP_PASS is not configured.');
+  if (!config.fromAddress) {
+    throw new Error('EMAIL_FROM_ADDRESS (or SMTP_FROM_EMAIL) is not configured.');
+  }
+}
+
+/**
+ * Provider-specific send via SMTP (nodemailer).
+ * @private
+ */
+async function sendViaSmtp({ toEmail, toName, subject, htmlBody }, config) {
+  assertSmtpConfig(config);
+
+  const transporter = nodemailer.createTransport({
+    host: config.smtp.host,
+    port: config.smtp.port,
+    secure: !!config.smtp.secure,
+    auth: {
+      user: config.smtp.user,
+      pass: config.smtp.pass
+    }
+  });
+
+  const to = toName ? `"${toName}" <${toEmail}>` : toEmail;
+  const info = await transporter.sendMail({
+    from: `"${config.fromName}" <${config.fromAddress}>`,
+    to,
+    subject,
+    html: htmlBody
+  });
+
+  return {
+    ok: true,
+    provider: PROVIDERS.SMTP,
+    messageId: info.messageId,
+    response: info.response,
+    data: info
+  };
+}
+
+/**
+ * Resolve the active transport strategy from EMAIL_PROVIDER.
+ * @private
+ */
+function getProviderStrategy(config = getConfig()) {
+  switch (config.provider) {
+    case PROVIDERS.SMTP:
+      return {
+        name: PROVIDERS.SMTP,
+        send: (message) => sendViaSmtp(message, config)
+      };
+    case PROVIDERS.REST_API:
+      return {
+        name: PROVIDERS.REST_API,
+        send: (message) => sendViaRestApi(message, config)
+      };
+    default:
+      throw new Error(
+        `Unsupported EMAIL_PROVIDER "${config.provider}". Supported: ${Object.values(PROVIDERS).join(', ')}`
+      );
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildOtpHtml({ toName, otpCode, brand }) {
+  const safeName = String(toName || '').trim() || 'there';
+  const code = String(otpCode || '').trim();
+  const brandName = String(brand || 'Tradrift').trim() || 'Tradrift';
+  const year = new Date().getFullYear();
+
+  // Plain, table-based HTML — avoids spam triggers (no scripts, tracking pixels, or heavy CSS).
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{{brand}} — ${title}</title>
+  <title>${brandName} verification code</title>
 </head>
-<body style="margin:0;padding:0;background:#0b0f14;color:#e8eef4;font-family:Outfit,Segoe UI,Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0b0f14;padding:32px 16px;">
+<body style="margin:0;padding:0;background:#f4f6f8;color:#1a1a1a;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6f8;padding:24px 12px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#12181f;border:1px solid #243040;border-radius:16px;overflow:hidden;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border:1px solid #e5e7eb;">
           <tr>
-            <td style="padding:28px 28px 12px 28px;">
-              <div style="font-size:20px;font-weight:700;letter-spacing:-0.02em;color:#ffffff;">
-                Trad<span style="color:#4cc9c0;">rift</span>
-              </div>
-              <div style="margin-top:4px;font-size:12px;color:#8b9aab;">Secure account email</div>
+            <td style="padding:24px 28px 8px 28px;font-size:18px;font-weight:bold;color:#111827;">
+              ${brandName}
             </td>
           </tr>
           <tr>
             <td style="padding:8px 28px 28px 28px;">
-              ${bodyHtml}
+              <p style="margin:0 0 12px 0;font-size:15px;line-height:1.5;color:#374151;">
+                Hi ${safeName},
+              </p>
+              <p style="margin:0 0 16px 0;font-size:15px;line-height:1.5;color:#374151;">
+                Your one-time verification code is:
+              </p>
+              <p style="margin:0 0 16px 0;font-size:28px;letter-spacing:6px;font-weight:bold;color:#111827;font-family:Courier New,Courier,monospace;">
+                ${code}
+              </p>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.5;color:#4b5563;">
+                This code expires shortly. Do not share it with anyone.
+              </p>
+              <p style="margin:0;font-size:13px;line-height:1.5;color:#6b7280;">
+                If you did not request this code, you can safely ignore this email.
+              </p>
             </td>
           </tr>
         </table>
-        <p style="margin:16px 0 0 0;font-size:11px;color:#64748b;">© {{year}} {{brand}}</p>
+        <p style="margin:16px 0 0 0;font-size:12px;color:#9ca3af;">
+          &copy; ${year} ${brandName}
+        </p>
       </td>
     </tr>
   </table>
@@ -68,417 +253,106 @@ function defaultShellHtml({ title, bodyHtml }) {
 </html>`;
 }
 
-function defaultOtpBody(heading) {
-  return `
-              <h1 style="margin:0;font-size:22px;line-height:1.3;color:#ffffff;font-weight:650;">${heading}</h1>
-              <p style="margin:12px 0 0 0;font-size:14px;line-height:1.6;color:#8b9aab;">
-                Hi {{name}},<br /><br />
-                Use this one-time password to continue. It expires in
-                <strong style="color:#e8eef4;">{{expiresMinutes}} minutes</strong>.
-              </p>
-              <div style="margin:24px 0;text-align:center;">
-                <div style="display:inline-block;padding:14px 22px;border-radius:12px;background:#0b0f14;border:1px solid #243040;color:#4cc9c0;font-size:28px;font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:0.28em;">
-                  {{otp}}
-                </div>
-              </div>
-              <p style="margin:0;font-size:13px;line-height:1.6;color:#8b9aab;">
-                This email was sent to <strong style="color:#e8eef4;">{{email}}</strong>.
-                If you did not request this, ignore this message. Never share your OTP.
-              </p>`;
-}
+/**
+ * Send a single email via the configured provider.
+ */
+export async function sendEmail({ toEmail, toName = '', subject, htmlBody }) {
+  const email = String(toEmail || '').trim().toLowerCase();
+  if (!email) throw new Error('toEmail is required.');
+  if (!subject) throw new Error('subject is required.');
+  if (!htmlBody) throw new Error('htmlBody is required.');
 
-function getDefaultTemplates() {
-  return {
-    signup_otp: {
-      key: 'signup_otp',
-      enabled: true,
-      subject: 'Verify your email — {{brand}} OTP {{otp}}',
-      html: defaultShellHtml({
-        title: 'Verify email',
-        bodyHtml: defaultOtpBody('Verify your email')
-      }),
-      text: 'Hi {{name}}, your {{brand}} signup OTP is {{otp}}. It expires in {{expiresMinutes}} minutes.'
-    },
-    login_otp: {
-      key: 'login_otp',
-      enabled: true,
-      subject: 'Your {{brand}} login code: {{otp}}',
-      html: defaultShellHtml({
-        title: 'Login code',
-        bodyHtml: defaultOtpBody('Login verification code')
-      }),
-      text: 'Hi {{name}}, your {{brand}} login OTP is {{otp}}. Expires in {{expiresMinutes}} minutes.'
-    },
-    recovery_otp: {
-      key: 'recovery_otp',
-      enabled: true,
-      subject: 'Reset your {{brand}} password — OTP {{otp}}',
-      html: defaultShellHtml({
-        title: 'Password reset',
-        bodyHtml: defaultOtpBody('Password reset code')
-      }),
-      text: 'Hi {{name}}, your {{brand}} password reset OTP is {{otp}}. Expires in {{expiresMinutes}} minutes.'
-    },
-    smtp_test: {
-      key: 'smtp_test',
-      enabled: true,
-      subject: '{{brand}} SMTP test OK — sample OTP {{otp}}',
-      html: defaultShellHtml({
-        title: 'SMTP test',
-        bodyHtml: defaultOtpBody('SMTP connection successful')
-      }),
-      text: '{{brand}} SMTP test OK. Sample OTP: {{otp}}'
-    }
-  };
-}
-
-function purposeToTemplateKey(purpose) {
-  const map = {
-    signup: 'signup_otp',
-    login: 'login_otp',
-    recovery: 'recovery_otp',
-    verification: 'signup_otp',
-    test: 'smtp_test'
-  };
-  return map[purpose] || 'signup_otp';
-}
-
-function defaultFromEnv() {
-  const host = String(process.env.SMTP_HOST || '').trim();
-  if (!host) return null;
-  return {
-    enabled: process.env.SMTP_ENABLED !== '0',
-    host,
-    port: Number(process.env.SMTP_PORT || 587) || 587,
-    secure: process.env.SMTP_SECURE === '1' || process.env.SMTP_SECURE === 'true',
-    user: String(process.env.SMTP_USER || '').trim(),
-    pass: String(process.env.SMTP_PASS || ''),
-    fromName: String(process.env.SMTP_FROM_NAME || 'Tradrift').trim() || 'Tradrift',
-    fromEmail: String(process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || '').trim()
-  };
-}
-
-export function getSmtpSettings() {
-  if (smtpConfig) return { ...smtpConfig };
-  const fromEnv = defaultFromEnv();
-  if (fromEnv) return fromEnv;
-  return {
-    enabled: false,
-    host: '',
-    port: 587,
-    secure: false,
-    user: '',
-    pass: '',
-    fromName: 'Tradrift',
-    fromEmail: ''
-  };
-}
-
-export function getPublicSmtpSettings() {
-  const s = getSmtpSettings();
-  const hasPass = Boolean(String(s.pass || '').trim());
-  return {
-    enabled: !!s.enabled,
-    host: s.host || '',
-    port: Number(s.port) || 587,
-    secure: !!s.secure,
-    user: s.user || '',
-    fromName: s.fromName || 'Tradrift',
-    fromEmail: s.fromEmail || '',
-    passSet: hasPass,
-    pass: hasPass ? '••••••••••••' : '',
-    configured: Boolean(s.host && s.user && hasPass && s.fromEmail)
-  };
-}
-
-export function setSmtpSettings(partial = {}) {
-  const current = getSmtpSettings();
-  const next = { ...current };
-
-  if (partial.enabled !== undefined) next.enabled = !!partial.enabled;
-  if (partial.host !== undefined) next.host = String(partial.host || '').trim();
-  if (partial.port !== undefined) next.port = Number(partial.port) || 587;
-  if (partial.secure !== undefined) next.secure = !!partial.secure;
-  if (partial.user !== undefined) next.user = String(partial.user || '').trim();
-  if (partial.fromName !== undefined) {
-    next.fromName = String(partial.fromName || 'Tradrift').trim() || 'Tradrift';
-  }
-  if (partial.fromEmail !== undefined) next.fromEmail = String(partial.fromEmail || '').trim();
-
-  if (partial.pass !== undefined) {
-    const pass = String(partial.pass || '');
-    if (pass && !/^•+$/.test(pass) && !pass.includes('••••')) {
-      next.pass = pass;
-    }
-  }
-
-  smtpConfig = next;
-  return getSmtpSettings();
-}
-
-export async function loadSmtpSettingsFromDb() {
-  try {
-    const doc = await Settings.findOne({ key: SMTP_KEY });
-    if (doc?.value && typeof doc.value === 'object') {
-      smtpConfig = {
-        enabled: doc.value.enabled !== false,
-        host: String(doc.value.host || '').trim(),
-        port: Number(doc.value.port) || 587,
-        secure: !!doc.value.secure,
-        user: String(doc.value.user || '').trim(),
-        pass: String(doc.value.pass || ''),
-        fromName: String(doc.value.fromName || 'Tradrift').trim() || 'Tradrift',
-        fromEmail: String(doc.value.fromEmail || '').trim()
-      };
-      return getSmtpSettings();
-    }
-  } catch (err) {
-    console.warn('[SMTP] load from DB failed:', err.message || err);
-  }
-  const fromEnv = defaultFromEnv();
-  if (fromEnv) smtpConfig = fromEnv;
-  return getSmtpSettings();
-}
-
-export async function persistSmtpSettings() {
-  const value = getSmtpSettings();
-  await Settings.findOneAndUpdate(
-    { key: SMTP_KEY },
-    { key: SMTP_KEY, value, updatedAt: new Date() },
-    { upsert: true, new: true }
-  );
-  return value;
-}
-
-export function isSmtpReady() {
-  const s = getSmtpSettings();
-  return !!(s.enabled && s.host && s.user && s.pass && s.fromEmail);
-}
-
-function normalizeTemplate(key, raw = {}) {
-  const defaults = getDefaultTemplates()[key] || getDefaultTemplates().signup_otp;
-  return {
-    key,
-    enabled: raw.enabled !== false,
-    subject: String(raw.subject || defaults.subject),
-    html: String(raw.html || defaults.html),
-    text: String(raw.text || defaults.text)
-  };
-}
-
-export function getEmailTemplates() {
-  const defaults = getDefaultTemplates();
-  const stored = templatesConfig || {};
-  const out = {};
-  for (const key of Object.keys(defaults)) {
-    out[key] = normalizeTemplate(key, stored[key] || defaults[key]);
-  }
-  return out;
-}
-
-export function getEmailTemplatesPublic() {
-  const templates = getEmailTemplates();
-  return Object.keys(templates).map((key) => ({
-    ...templates[key],
-    ...(TEMPLATE_META[key] || { label: key, description: '' })
-  }));
-}
-
-export function setEmailTemplate(key, partial = {}) {
-  const allowed = Object.keys(getDefaultTemplates());
-  if (!allowed.includes(key)) {
-    throw new Error(`Unknown template key: ${key}`);
-  }
-  const current = getEmailTemplates();
-  const nextOne = normalizeTemplate(key, {
-    ...current[key],
-    ...partial,
-    key
+  const strategy = getProviderStrategy();
+  return strategy.send({
+    toEmail: email,
+    toName: String(toName || '').trim(),
+    subject: String(subject),
+    htmlBody: String(htmlBody)
   });
-  templatesConfig = {
-    ...current,
-    [key]: nextOne
-  };
-  return nextOne;
-}
-
-export function resetEmailTemplate(key) {
-  const defaults = getDefaultTemplates();
-  if (!defaults[key]) throw new Error(`Unknown template key: ${key}`);
-  const all = getEmailTemplates();
-  templatesConfig = {
-    ...all,
-    [key]: { ...defaults[key] }
-  };
-  return templatesConfig[key];
-}
-
-export async function loadEmailTemplatesFromDb() {
-  try {
-    const doc = await Settings.findOne({ key: TEMPLATES_KEY });
-    if (doc?.value && typeof doc.value === 'object') {
-      const defaults = getDefaultTemplates();
-      const merged = {};
-      for (const key of Object.keys(defaults)) {
-        merged[key] = normalizeTemplate(key, doc.value[key] || defaults[key]);
-      }
-      templatesConfig = merged;
-      return getEmailTemplates();
-    }
-  } catch (err) {
-    console.warn('[EmailTemplates] load from DB failed:', err.message || err);
-  }
-  templatesConfig = getDefaultTemplates();
-  return getEmailTemplates();
-}
-
-export async function persistEmailTemplates() {
-  const value = getEmailTemplates();
-  await Settings.findOneAndUpdate(
-    { key: TEMPLATES_KEY },
-    { key: TEMPLATES_KEY, value, updatedAt: new Date() },
-    { upsert: true, new: true }
-  );
-  return value;
-}
-
-export function renderTemplateString(template, vars = {}) {
-  return String(template || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
-    if (Object.prototype.hasOwnProperty.call(vars, key) && vars[key] != null) {
-      return String(vars[key]);
-    }
-    return '';
-  });
-}
-
-function buildTemplateVars({
-  otp,
-  recipientName = '',
-  email = '',
-  expiresMinutes = 10,
-  purpose = ''
-}) {
-  const smtp = getSmtpSettings();
-  const name = String(recipientName || '').trim() || 'there';
-  return {
-    otp: String(otp || ''),
-    name,
-    email: String(email || '').trim().toLowerCase(),
-    expiresMinutes: String(expiresMinutes),
-    purpose: String(purpose || ''),
-    brand: smtp.fromName || 'Tradrift',
-    year: String(new Date().getFullYear())
-  };
-}
-
-function createTransport() {
-  const s = getSmtpSettings();
-  if (!s.host) throw new Error('SMTP host is not configured.');
-  return nodemailer.createTransport({
-    host: s.host,
-    port: Number(s.port) || 587,
-    secure: !!s.secure,
-    auth: {
-      user: s.user,
-      pass: s.pass
-    }
-  });
-}
-
-export async function sendMail({ to, subject, html, text }) {
-  if (!isSmtpReady()) {
-    throw new Error('SMTP is not configured or disabled. Set it up in Admin → Email Templates.');
-  }
-  const s = getSmtpSettings();
-  const transporter = createTransport();
-  return transporter.sendMail({
-    from: `"${s.fromName}" <${s.fromEmail}>`,
-    to,
-    subject,
-    html,
-    text: text || undefined
-  });
-}
-
-export async function sendTemplatedEmail({
-  to,
-  templateKey,
-  vars = {}
-}) {
-  const templates = getEmailTemplates();
-  const tpl = templates[templateKey];
-  if (!tpl) throw new Error(`Email template missing: ${templateKey}`);
-  if (tpl.enabled === false) {
-    throw new Error(`Email template "${templateKey}" is disabled.`);
-  }
-
-  const subject = renderTemplateString(tpl.subject, vars);
-  const html = renderTemplateString(tpl.html, vars);
-  const text = renderTemplateString(tpl.text, vars);
-
-  await sendMail({ to, subject, html, text });
-  return { subject, templateKey };
 }
 
 /**
- * Generate random OTP and send via dynamic template.
+ * Send an OTP email with a spam-safe HTML template.
  */
-export async function sendOtpEmail({
-  to,
-  purpose = 'verification',
-  recipientName = '',
-  digits = 6,
-  expiresMinutes = 10
+export async function sendOTP({ toEmail, toName = '', otpCode }) {
+  const code = String(otpCode || '').trim();
+  if (!code) throw new Error('otpCode is required.');
+
+  const config = getConfig();
+  const brand = config.fromName;
+  const subject = `${brand} verification code: ${code}`;
+  const htmlBody = buildOtpHtml({ toName, otpCode: code, brand });
+
+  return sendEmail({ toEmail, toName, subject, htmlBody });
+}
+
+/**
+ * Send the same message to many recipients in paced batches
+ * to reduce rate-limit failures at high daily volume.
+ */
+export async function sendBulkEmails({
+  recipients,
+  subject,
+  htmlBody,
+  batchSize = 10,
+  delayMs = 1000
 }) {
-  const otp = generateNumericCode(digits);
-  const templateKey = purposeToTemplateKey(purpose);
-  const vars = buildTemplateVars({
-    otp,
-    recipientName,
-    email: to,
-    expiresMinutes,
-    purpose
-  });
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    throw new Error('recipients must be a non-empty array.');
+  }
+  if (!subject) throw new Error('subject is required.');
+  if (!htmlBody) throw new Error('htmlBody is required.');
 
-  await sendTemplatedEmail({ to, templateKey, vars });
-  return otp;
+  const size = Math.max(1, Number(batchSize) || 10);
+  const pause = Math.max(0, Number(delayMs) || 0);
+
+  const results = [];
+  const errors = [];
+
+  for (let i = 0; i < recipients.length; i += size) {
+    const batch = recipients.slice(i, i + size);
+
+    const settled = await Promise.allSettled(
+      batch.map((recipient) => {
+        const toEmail =
+          typeof recipient === 'string' ? recipient : recipient?.toEmail || recipient?.email;
+        const toName =
+          typeof recipient === 'string' ? '' : recipient?.toName || recipient?.name || '';
+
+        return sendEmail({ toEmail, toName, subject, htmlBody }).then((result) => ({
+          toEmail: String(toEmail || '').trim().toLowerCase(),
+          result
+        }));
+      })
+    );
+
+    for (const item of settled) {
+      if (item.status === 'fulfilled') {
+        results.push(item.value);
+      } else {
+        errors.push({
+          error: item.reason?.message || String(item.reason)
+        });
+      }
+    }
+
+    const hasMore = i + size < recipients.length;
+    if (hasMore && pause > 0) {
+      await sleep(pause);
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    sent: results.length,
+    failed: errors.length,
+    results,
+    errors
+  };
 }
 
-export async function sendTestSmtpEmail(to) {
-  const otp = generateNumericCode(6);
-  const vars = buildTemplateVars({
-    otp,
-    recipientName: '',
-    email: to,
-    expiresMinutes: 10,
-    purpose: 'test'
-  });
-  await sendTemplatedEmail({ to, templateKey: 'smtp_test', vars });
-  return { ok: true };
-}
-
-/** Keep for any legacy callers / preview */
-export function buildOtpEmailHtml(opts) {
-  const key = purposeToTemplateKey(opts?.purpose || 'verification');
-  const tpl = getEmailTemplates()[key];
-  const vars = buildTemplateVars(opts);
-  return renderTemplateString(tpl.html, vars);
-}
-
-export function shouldExposeOtpInApi() {
-  // Never leak OTPs in production — even if AUTH_DEBUG_CODES is mistakenly set.
-  if (process.env.NODE_ENV === 'production') return false;
-  return process.env.AUTH_DEBUG_CODES === '1';
-}
-
-export function getTemplateVariableHelp() {
-  return [
-    { key: 'otp', label: 'One-time password' },
-    { key: 'name', label: 'Recipient name' },
-    { key: 'email', label: 'Recipient email' },
-    { key: 'expiresMinutes', label: 'OTP expiry minutes' },
-    { key: 'brand', label: 'From / brand name' },
-    { key: 'year', label: 'Current year' },
-    { key: 'purpose', label: 'Purpose key' }
-  ];
-}
+export default {
+  sendEmail,
+  sendOTP,
+  sendBulkEmails
+};

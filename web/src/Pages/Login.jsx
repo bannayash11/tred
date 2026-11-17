@@ -25,12 +25,17 @@ import {
   loginApi,
   registerApi,
   registerSendOtpApi,
+  resend2faApi,
   resetPasswordApi,
-  verify2faApi
+  verify2faApi,
+  verifyRecoveryOtpApi
 } from '../services/api';
 import { loginSuccess } from '../store/slices/authSlice';
 import authDeskImage from '../assets/auth-trading-desk.jpg';
 import { useTheme } from '../context/ThemeContext';
+import OtpInputBoxes from '../components/OtpInputBoxes';
+import { OTP_DIGITS, OTP_RESEND_COOLDOWN_SEC, isCompleteOtp } from '../lib/otp';
+import useOtpCooldown from '../hooks/useOtpCooldown';
 
 /** Only allow same-app relative paths (blocks open redirects like //evil.com). */
 function safeNextPath(raw, fallback = '/order-flow') {
@@ -112,12 +117,18 @@ export default function Login({ mode = 'login' }) {
   const [requires2fa, setRequires2fa] = useState(false);
   const [requiresSignupOtp, setRequiresSignupOtp] = useState(false);
   const [otpCode, setOtpCode] = useState('');
+  const [otpResending, setOtpResending] = useState(false);
+  const authOtpCooldown = useOtpCooldown(0);
+  const recoveryOtpCooldown = useOtpCooldown(0);
 
   const [showForgot, setShowForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [recoveryStep, setRecoveryStep] = useState(1);
+  const [recoveryStep, setRecoveryStep] = useState(1); // 1 email → 2 OTP → 3 new password
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState('');
   const [recoveryError, setRecoveryError] = useState('');
   const [recoveryLoading, setRecoveryLoading] = useState(false);
@@ -186,9 +197,28 @@ export default function Login({ mode = 'login' }) {
     setRecoveryStep(1);
     setRecoveryCode('');
     setNewPassword('');
+    setConfirmPassword('');
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
     setRecoveryNotice('');
     setRecoveryError('');
+    setRequires2fa(false);
+    setRequiresSignupOtp(false);
+    setOtpCode('');
+    recoveryOtpCooldown.clear();
     setShowForgot(true);
+    clearFormErrors();
+  };
+
+  const closeForgot = () => {
+    setShowForgot(false);
+    setRecoveryStep(1);
+    setRecoveryCode('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setRecoveryNotice('');
+    setRecoveryError('');
+    recoveryOtpCooldown.clear();
   };
 
   const handleRequestRecovery = async (e) => {
@@ -207,11 +237,106 @@ export default function Login({ mode = 'login' }) {
         setRecoveryNotice(res.message || 'If that account exists, an OTP was emailed.');
         if (res.otp) setRecoveryCode(res.otp);
         setRecoveryStep(2);
+        recoveryOtpCooldown.start(res.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
       } else {
         setRecoveryError(res.message || 'Could not start recovery.');
       }
     } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) recoveryOtpCooldown.start(retry);
       setRecoveryError(err.userMessage || err.response?.data?.message || 'Could not start recovery.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const handleResendRecoveryOtp = async () => {
+    if (recoveryOtpCooldown.active || recoveryLoading) return;
+    setRecoveryError('');
+    setRecoveryLoading(true);
+    try {
+      const res = await forgotPasswordApi({
+        email: String(forgotEmail || '').trim().toLowerCase()
+      });
+      if (res.success) {
+        setRecoveryNotice(res.message || 'OTP resent to your email.');
+        if (res.otp) setRecoveryCode(res.otp);
+        recoveryOtpCooldown.start(res.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
+      } else {
+        setRecoveryError(res.message || 'Could not resend OTP.');
+      }
+    } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) recoveryOtpCooldown.start(retry);
+      setRecoveryError(err.userMessage || err.response?.data?.message || 'Could not resend OTP.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const handleResendAuthOtp = async () => {
+    if (authOtpCooldown.active || otpResending) return;
+    setOtpResending(true);
+    clearFormErrors();
+    try {
+      if (requiresSignupOtp) {
+        const res = await registerSendOtpApi({
+          email: String(email || '').trim().toLowerCase()
+        });
+        if (res.success) {
+          if (res.otp) setOtpCode(res.otp);
+          authOtpCooldown.start(res.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
+        } else {
+          applyAuthMessage(res.message || 'Could not resend OTP.', 'otp');
+        }
+        return;
+      }
+      if (requires2fa) {
+        const res = await resend2faApi({
+          email: String(email || '').trim().toLowerCase()
+        });
+        if (res.success) {
+          if (res.otp) setOtpCode(res.otp);
+          authOtpCooldown.start(res.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
+        } else {
+          applyAuthMessage(res.message || 'Could not resend OTP.', 'otp');
+        }
+      }
+    } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) authOtpCooldown.start(retry);
+      applyAuthMessage(
+        err.userMessage || err.response?.data?.message || 'Could not resend OTP.',
+        'otp'
+      );
+    } finally {
+      setOtpResending(false);
+    }
+  };
+
+  const handleVerifyRecoveryOtp = async (e) => {
+    e.preventDefault();
+    setRecoveryError('');
+    if (!isCompleteOtp(recoveryCode)) {
+      setRecoveryError(`Please enter the ${OTP_DIGITS}-digit OTP from your email.`);
+      return;
+    }
+    setRecoveryLoading(true);
+    try {
+      const res = await verifyRecoveryOtpApi({
+        email: String(forgotEmail || '').trim().toLowerCase(),
+        code: recoveryCode
+      });
+      if (res.success) {
+        setRecoveryNotice(res.message || 'OTP verified. Set your new password.');
+        setRecoveryStep(3);
+      } else {
+        setRecoveryError(res.message || 'Invalid or expired verification code.');
+      }
+    } catch (err) {
+      setRecoveryError(
+        err.userMessage || err.response?.data?.message || 'Invalid or expired verification code.'
+      );
     } finally {
       setRecoveryLoading(false);
     }
@@ -220,12 +345,12 @@ export default function Login({ mode = 'login' }) {
   const handleResetPassword = async (e) => {
     e.preventDefault();
     setRecoveryError('');
-    if (!String(recoveryCode || '').trim()) {
-      setRecoveryError('Please enter the 6-digit OTP from your email.');
-      return;
-    }
     if (!newPassword || newPassword.length < 6) {
       setRecoveryError('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setRecoveryError('New password and confirm password do not match.');
       return;
     }
     setRecoveryLoading(true);
@@ -236,10 +361,10 @@ export default function Login({ mode = 'login' }) {
         newPassword
       });
       if (res.success) {
-        setShowForgot(false);
         setPassword(newPassword);
         setIsRegister(false);
         clearFormErrors();
+        closeForgot();
         setRecoveryNotice('');
         alert('Password reset successfully. Please sign in.');
       } else {
@@ -259,6 +384,10 @@ export default function Login({ mode = 'login' }) {
 
     try {
       if (requires2fa) {
+        if (!isCompleteOtp(otpCode)) {
+          applyAuthMessage(`Enter the ${OTP_DIGITS}-digit verification code.`, 'otp');
+          return;
+        }
         const res = await verify2faApi({ email: String(email).trim().toLowerCase(), code: otpCode });
         if (res.success && res.token) {
           finishLogin(res);
@@ -269,8 +398,8 @@ export default function Login({ mode = 'login' }) {
       }
 
       if (isRegister && requiresSignupOtp) {
-        if (!/^\d{6}$/.test(String(otpCode || '').trim())) {
-          applyAuthMessage('Enter the 6-digit OTP sent to your email.', 'otp');
+        if (!isCompleteOtp(otpCode)) {
+          applyAuthMessage(`Enter the ${OTP_DIGITS}-digit OTP sent to your email.`, 'otp');
           return;
         }
         const normalizedEmail = String(email || '').trim().toLowerCase();
@@ -318,6 +447,7 @@ export default function Login({ mode = 'login' }) {
         if (otpRes.success) {
           setOtpCode(otpRes.otp || '');
           setRequiresSignupOtp(true);
+          authOtpCooldown.start(otpRes.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
           clearFormErrors();
           return;
         }
@@ -332,6 +462,7 @@ export default function Login({ mode = 'login' }) {
 
       if (res.success && res.requires2fa) {
         setRequires2fa(true);
+        authOtpCooldown.start(res.retryAfterSec || OTP_RESEND_COOLDOWN_SEC);
         clearFormErrors();
         return;
       }
@@ -342,6 +473,8 @@ export default function Login({ mode = 'login' }) {
         applyAuthMessage(res.message || 'Invalid email or password. Please check your details.');
       }
     } catch (err) {
+      const retry = err.response?.data?.retryAfterSec;
+      if (retry) authOtpCooldown.start(retry);
       applyAuthMessage(
         err.userMessage ||
           err.response?.data?.message ||
@@ -350,7 +483,11 @@ export default function Login({ mode = 'login' }) {
               ? 'Could not verify OTP. Please try again.'
               : 'Could not send verification OTP. Please check your details.'
             : 'Invalid email or password. Please check your details.'),
-        isRegister && requiresSignupOtp ? 'otp' : undefined
+        isRegister && requiresSignupOtp
+          ? 'otp'
+          : isRegister
+            ? 'email'
+            : undefined
       );
     } finally {
       setLoading(false);
@@ -358,6 +495,7 @@ export default function Login({ mode = 'login' }) {
   };
 
   const switchMode = () => {
+    closeForgot();
     setIsRegister(!isRegister);
     clearFormErrors();
     setConfirmAge18(false);
@@ -636,21 +774,223 @@ export default function Login({ mode = 'login' }) {
               Trader Portal · 18+
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              {requiresSignupOtp
-                ? 'Verify your email'
-                : isRegister
-                  ? 'Create your trader account'
-                  : 'Welcome back, trader'}
+              {showForgot
+                ? recoveryStep === 3
+                  ? 'Set a new password'
+                  : recoveryStep === 2
+                    ? 'Verify recovery OTP'
+                    : 'Reset your password'
+                : requiresSignupOtp
+                  ? 'Verify your email'
+                  : isRegister
+                    ? 'Create your trader account'
+                    : 'Welcome back, trader'}
             </h2>
             <p className="text-sm text-slate-400">
-              {requiresSignupOtp
-                ? 'Enter the 6-digit OTP emailed to you to finish signup.'
-                : isRegister
-                  ? 'Create your account (18+). Choose a membership plan to unlock Charts & Market X-Ray.'
-                  : 'Access your dashboard, saved setups and live SMC charts.'}
+              {showForgot
+                ? recoveryStep === 3
+                  ? 'Choose a new password and confirm it to finish reset.'
+                  : recoveryStep === 2
+                    ? `Enter the ${OTP_DIGITS}-digit OTP emailed to ${forgotEmail || 'you'}.`
+                    : `Enter your account email. We will send a ${OTP_DIGITS}-digit OTP.`
+                : requiresSignupOtp
+                  ? `Enter the ${OTP_DIGITS}-digit OTP emailed to you to finish signup.`
+                  : isRegister
+                    ? 'Create your account (18+). Choose a membership plan to unlock Charts & Market X-Ray.'
+                    : 'Access your dashboard, saved setups and live SMC charts.'}
             </p>
           </div>
 
+          {showForgot ? (
+            <div className="space-y-3.5">
+              {recoveryNotice && (
+                <div className="rounded-xl bg-emerald-950/80 border border-emerald-800/50 p-2.5 text-[12px] text-emerald-400">
+                  {recoveryNotice}
+                </div>
+              )}
+
+              {recoveryStep === 1 && (
+                <form onSubmit={handleRequestRecovery} className="space-y-3.5">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-400 block mb-1.5">Email Address</label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                      <input
+                        type="email"
+                        required
+                        placeholder="you@example.com"
+                        value={forgotEmail}
+                        onChange={(e) => {
+                          setForgotEmail(e.target.value.toLowerCase());
+                          if (recoveryError) setRecoveryError('');
+                        }}
+                        className={`w-full rounded-xl bg-slate-950/80 py-3 pl-10 pr-3 text-sm text-white border focus:ring-1 focus:outline-none transition-colors ${
+                          recoveryError ? 'border-rose-600' : 'border-slate-800 focus:border-cyan-400 focus:ring-cyan-400/40'
+                        }`}
+                      />
+                    </div>
+                    {recoveryError && (
+                      <p className="mt-1.5 text-[11px] font-medium text-rose-400">{recoveryError}</p>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={recoveryLoading}
+                    className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 via-cyan-500 to-teal-500 py-3 text-sm font-extrabold text-black hover:opacity-95 transition-all shadow-lg shadow-cyan-500/25 disabled:opacity-50"
+                  >
+                    {recoveryLoading ? 'Sending…' : 'Send OTP'}
+                    {!recoveryLoading && <ArrowRight className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeForgot}
+                    className="w-full text-center text-[11px] font-semibold text-slate-400 hover:text-cyan-400"
+                  >
+                    ← Back to sign in
+                  </button>
+                </form>
+              )}
+
+              {recoveryStep === 2 && (
+                <form onSubmit={handleVerifyRecoveryOtp} className="space-y-3.5">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+                      Recovery OTP
+                    </label>
+                    <OtpInputBoxes
+                      id="recovery-otp"
+                      value={recoveryCode}
+                      length={OTP_DIGITS}
+                      hasError={Boolean(recoveryError)}
+                      ariaLabel="Password recovery OTP"
+                      onChange={(next) => {
+                        setRecoveryCode(next);
+                        if (recoveryError) setRecoveryError('');
+                      }}
+                    />
+                    {recoveryError && (
+                      <p className="mt-1.5 text-[11px] font-medium text-rose-400">{recoveryError}</p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={recoveryOtpCooldown.active || recoveryLoading}
+                      onClick={handleResendRecoveryOtp}
+                      className="mt-2 text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 disabled:cursor-not-allowed disabled:text-slate-600"
+                    >
+                      {recoveryLoading
+                        ? 'Sending…'
+                        : recoveryOtpCooldown.active
+                          ? `Resend OTP in ${recoveryOtpCooldown.secondsLeft}s`
+                          : 'Resend OTP'}
+                    </button>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={recoveryLoading || !isCompleteOtp(recoveryCode)}
+                    className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 via-cyan-500 to-teal-500 py-3 text-sm font-extrabold text-black hover:opacity-95 transition-all shadow-lg shadow-cyan-500/25 disabled:opacity-50"
+                  >
+                    {recoveryLoading ? 'Verifying…' : 'Verify OTP'}
+                    {!recoveryLoading && <ArrowRight className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecoveryStep(1);
+                      setRecoveryCode('');
+                      setRecoveryError('');
+                      setRecoveryNotice('');
+                    }}
+                    className="w-full text-center text-[11px] font-semibold text-slate-400 hover:text-cyan-400"
+                  >
+                    ← Change email
+                  </button>
+                </form>
+              )}
+
+              {recoveryStep === 3 && (
+                <form onSubmit={handleResetPassword} className="space-y-3.5">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+                      New Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        placeholder="Min 6 characters"
+                        value={newPassword}
+                        onChange={(e) => {
+                          setNewPassword(e.target.value);
+                          if (recoveryError) setRecoveryError('');
+                        }}
+                        className={`w-full rounded-xl bg-slate-950/80 py-3 pl-10 pr-11 text-sm text-white border focus:ring-1 focus:outline-none transition-colors ${
+                          recoveryError ? 'border-rose-600' : 'border-slate-800 focus:border-cyan-400 focus:ring-cyan-400/40'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((v) => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300"
+                        aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+                      Confirm Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        placeholder="Re-enter new password"
+                        value={confirmPassword}
+                        onChange={(e) => {
+                          setConfirmPassword(e.target.value);
+                          if (recoveryError) setRecoveryError('');
+                        }}
+                        className={`w-full rounded-xl bg-slate-950/80 py-3 pl-10 pr-11 text-sm text-white border focus:ring-1 focus:outline-none transition-colors ${
+                          recoveryError ? 'border-rose-600' : 'border-slate-800 focus:border-cyan-400 focus:ring-cyan-400/40'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((v) => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300"
+                        aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    {recoveryError && (
+                      <p className="mt-1.5 text-[11px] font-medium text-rose-400">{recoveryError}</p>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={recoveryLoading}
+                    className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-400 via-emerald-500 to-teal-500 py-3 text-sm font-extrabold text-black hover:opacity-95 transition-all shadow-lg shadow-emerald-500/25 disabled:opacity-50"
+                  >
+                    {recoveryLoading ? 'Saving…' : 'Reset Password'}
+                    {!recoveryLoading && <ArrowRight className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeForgot}
+                    className="w-full text-center text-[11px] font-semibold text-slate-400 hover:text-cyan-400"
+                  >
+                    ← Back to sign in
+                  </button>
+                </form>
+              )}
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-3.5">
             {requires2fa || requiresSignupOtp ? (
               <div>
@@ -662,42 +1002,51 @@ export default function Login({ mode = 'login' }) {
                     OTP sent to <span className="font-semibold text-slate-200">{email}</span>
                   </p>
                 )}
-                <div className="relative">
-                  <ShieldCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    required
-                    maxLength={6}
-                    placeholder="6-digit OTP"
-                    value={otpCode}
-                    onChange={(e) => {
-                      setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
-                      if (fieldErrors.otp) clearFormErrors();
-                    }}
-                    className={`w-full rounded-xl bg-slate-950/80 py-3 pl-10 pr-3 text-sm text-white border focus:ring-1 focus:outline-none transition-colors tracking-widest ${inputBorder('otp')}`}
-                  />
-                </div>
+                <OtpInputBoxes
+                  id="auth-otp"
+                  value={otpCode}
+                  length={OTP_DIGITS}
+                  hasError={Boolean(fieldErrors.otp)}
+                  ariaLabel={requiresSignupOtp ? 'Email verification OTP' : '2FA verification code'}
+                  onChange={(next) => {
+                    setOtpCode(next);
+                    if (fieldErrors.otp) clearFormErrors();
+                  }}
+                />
                 {fieldHint('otp')}
                 <p className="mt-1.5 text-[10px] text-slate-500">
                   Check your inbox (and spam) for the Tradrift OTP email.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (requiresSignupOtp) {
-                      setRequiresSignupOtp(false);
-                    } else {
-                      setRequires2fa(false);
-                    }
-                    setOtpCode('');
-                    clearFormErrors();
-                  }}
-                  className="mt-2 text-[11px] font-semibold text-slate-400 hover:text-cyan-400"
-                >
-                  ← Back to {requiresSignupOtp ? 'details' : 'password'}
-                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={authOtpCooldown.active || otpResending}
+                    onClick={handleResendAuthOtp}
+                    className="text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 disabled:cursor-not-allowed disabled:text-slate-600"
+                  >
+                    {otpResending
+                      ? 'Sending…'
+                      : authOtpCooldown.active
+                        ? `Resend OTP in ${authOtpCooldown.secondsLeft}s`
+                        : 'Resend OTP'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (requiresSignupOtp) {
+                        setRequiresSignupOtp(false);
+                      } else {
+                        setRequires2fa(false);
+                      }
+                      setOtpCode('');
+                      authOtpCooldown.clear();
+                      clearFormErrors();
+                    }}
+                    className="text-[11px] font-semibold text-slate-400 hover:text-cyan-400"
+                  >
+                    ← Back to {requiresSignupOtp ? 'details' : 'password'}
+                  </button>
+                </div>
               </div>
             ) : (
               <>
@@ -913,7 +1262,9 @@ export default function Login({ mode = 'login' }) {
               {!loading && <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />}
             </button>
           </form>
+          )}
 
+          {!showForgot && (
           <div className="mt-6 text-center text-sm text-slate-400">
             {isRegister ? 'Already have an account?' : "Don't have an account yet?"}{' '}
             <button
@@ -924,126 +1275,9 @@ export default function Login({ mode = 'login' }) {
               {isRegister ? 'Sign In' : 'Create Account'}
             </button>
           </div>
+          )}
         </div>
       </main>
-
-      {showForgot && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 p-0 sm:p-4 backdrop-blur-md">
-          <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-800 bg-[#0a0f1d] p-5 sm:p-6 shadow-2xl space-y-4 text-xs max-h-[92vh] overflow-y-auto">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-cyan-400" />
-              Reset Password
-            </h3>
-            <p className="text-slate-400">
-              Enter your account email. We will send a 6-digit OTP to reset your password.
-            </p>
-
-            {recoveryNotice && (
-              <div className="rounded-xl bg-emerald-950/80 border border-emerald-800/50 p-2.5 text-emerald-400">
-                {recoveryNotice}
-              </div>
-            )}
-
-            {recoveryStep === 1 ? (
-              <form onSubmit={handleRequestRecovery} className="space-y-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Email</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="you@gmail.com, you@yahoo.com, you@outlook.com, you@getnada.com"
-                    value={forgotEmail}
-                    onChange={(e) => {
-                      setForgotEmail(e.target.value.toLowerCase());
-                      if (recoveryError) setRecoveryError('');
-                    }}
-                    className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border placeholder:text-slate-600 ${
-                      recoveryError ? 'border-rose-600' : 'border-slate-800'
-                    }`}
-                  />
-                  {recoveryError && (
-                    <p className="mt-1.5 text-[11px] font-medium text-rose-400">{recoveryError}</p>
-                  )}
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgot(false)}
-                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-slate-300"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={recoveryLoading}
-                    className="rounded-lg bg-cyan-500 px-4 py-1.5 font-bold text-black disabled:opacity-50"
-                  >
-                    {recoveryLoading ? 'Sending…' : 'Continue'}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <form onSubmit={handleResetPassword} className="space-y-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">OTP</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    required
-                    maxLength={6}
-                    placeholder="6-digit OTP"
-                    value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="w-full rounded-xl bg-slate-950 p-2.5 font-mono text-white border border-slate-800 text-center tracking-widest text-sm"
-                  />
-                  <p className="mt-1.5 text-[10px] text-slate-500">
-                    Enter the OTP from your email.
-                  </p>
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">New Password</label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    placeholder="Min 6 characters"
-                    value={newPassword}
-                    onChange={(e) => {
-                      setNewPassword(e.target.value);
-                      if (recoveryError) setRecoveryError('');
-                    }}
-                    className={`w-full rounded-xl bg-slate-950 p-2.5 text-white border ${
-                      recoveryError ? 'border-rose-600' : 'border-slate-800'
-                    }`}
-                  />
-                  {recoveryError && (
-                    <p className="mt-1.5 text-[11px] font-medium text-rose-400">{recoveryError}</p>
-                  )}
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForgot(false);
-                      setRecoveryError('');
-                    }}
-                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-slate-300"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={recoveryLoading}
-                    className="rounded-lg bg-emerald-500 px-4 py-1.5 font-bold text-black disabled:opacity-50"
-                  >
-                    {recoveryLoading ? 'Saving…' : 'Reset Password'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
 
       <style>{`
         @keyframes authZoom {
