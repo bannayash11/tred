@@ -1,13 +1,23 @@
 /**
- * Platform (server-plan) broker credentials — Kotak + Upstox —
+ * Platform (server-plan) broker credentials — Fyers (default) + Kotak + Upstox —
  * managed from Admin in one save. Secrets encrypted in Settings DB.
- * Applied to process.env + live Kotak / Order Flow runtime.
+ * Applied to process.env + live Fyers / Kotak / Order Flow runtime.
  */
 import { Settings } from '../models/Settings.js';
 import { encryptObject, decryptObject, maskSecret } from '../utils/cryptoSecrets.js';
 import { kotakNeoService } from './kotakNeoService.js';
+import { fyersService } from './fyersService.js';
 
 const SETTINGS_KEY = 'platform_broker';
+
+const EMPTY_FYERS = {
+  appId: '',
+  appSecret: '',
+  accessToken: '',
+  refreshToken: '',
+  pin: '',
+  redirectUri: 'https://trade.fyers.in/api-login/redirect-uri/index.html'
+};
 
 const EMPTY_KOTAK = {
   consumerKey: '',
@@ -23,6 +33,7 @@ const EMPTY_UPSTOX = {
 
 /** In-memory plaintext after load (never sent to client unmasked). */
 let runtime = {
+  fyers: { ...EMPTY_FYERS },
   kotak: { ...EMPTY_KOTAK },
   upstox: { ...EMPTY_UPSTOX },
   updatedAt: null
@@ -46,6 +57,7 @@ function mergeSecretFields(prev, incoming, keys) {
 
 export function getPlatformBrokerRuntime() {
   return {
+    fyers: { ...runtime.fyers },
     kotak: { ...runtime.kotak },
     upstox: { ...runtime.upstox },
     updatedAt: runtime.updatedAt
@@ -54,9 +66,21 @@ export function getPlatformBrokerRuntime() {
 
 /** Safe for admin UI */
 export function getPlatformBrokerPublic() {
+  const f = runtime.fyers;
   const k = runtime.kotak;
   const u = runtime.upstox;
   return {
+    primary: f.appId && f.accessToken ? 'fyers' : k.consumerKey ? 'kotak' : u.accessToken ? 'upstox' : null,
+    fyers: {
+      appId: f.appId || '',
+      appSecret: f.appSecret ? maskSecret(f.appSecret, 4) : '',
+      accessToken: f.accessToken ? maskSecret(f.accessToken, 4) : '',
+      refreshToken: f.refreshToken ? maskSecret(f.refreshToken, 4) : '',
+      pin: f.pin ? '••••••' : '',
+      redirectUri: f.redirectUri || EMPTY_FYERS.redirectUri,
+      configured: Boolean(f.appId && f.accessToken),
+      canAutoRefresh: Boolean(f.appId && f.appSecret && f.refreshToken && f.pin)
+    },
     kotak: {
       consumerKey: k.consumerKey ? maskSecret(k.consumerKey, 4) : '',
       ucc: k.ucc || '',
@@ -75,8 +99,16 @@ export function getPlatformBrokerPublic() {
 }
 
 export function applyPlatformBrokerToEnv() {
+  const f = runtime.fyers;
   const k = runtime.kotak;
   const u = runtime.upstox;
+
+  if (f.appId) process.env.FYERS_APP_ID = f.appId;
+  if (f.appSecret) process.env.FYERS_APP_SECRET = f.appSecret;
+  if (f.accessToken) process.env.FYERS_ACCESS_TOKEN = f.accessToken;
+  if (f.refreshToken) process.env.FYERS_REFRESH_TOKEN = f.refreshToken;
+  if (f.pin) process.env.FYERS_PIN = f.pin;
+  if (f.redirectUri) process.env.FYERS_REDIRECT_URI = f.redirectUri;
 
   if (k.consumerKey) process.env.KOTAK_CONSUMER_KEY = k.consumerKey;
   if (k.ucc) process.env.KOTAK_UCC = k.ucc;
@@ -85,7 +117,17 @@ export function applyPlatformBrokerToEnv() {
   if (k.totpKey) process.env.KOTAK_TOTP_KEY = k.totpKey;
   if (u.accessToken) process.env.UPSTOX_ACCESS_TOKEN = u.accessToken;
 
-  // Hot-reload Kotak singleton (constructor already ran with old env)
+  if (typeof fyersService.applyCredentials === 'function') {
+    fyersService.applyCredentials({
+      appId: process.env.FYERS_APP_ID || '',
+      appSecret: process.env.FYERS_APP_SECRET || '',
+      accessToken: process.env.FYERS_ACCESS_TOKEN || '',
+      refreshToken: process.env.FYERS_REFRESH_TOKEN || '',
+      pin: process.env.FYERS_PIN || '',
+      redirectUri: process.env.FYERS_REDIRECT_URI || ''
+    });
+  }
+
   if (typeof kotakNeoService.applyCredentials === 'function') {
     kotakNeoService.applyCredentials({
       consumerKey: process.env.KOTAK_CONSUMER_KEY || '',
@@ -102,6 +144,15 @@ export function applyPlatformBrokerToEnv() {
  */
 export function seedRuntimeFromEnv() {
   runtime = {
+    fyers: {
+      appId: process.env.FYERS_APP_ID || '',
+      appSecret: process.env.FYERS_APP_SECRET || '',
+      accessToken: process.env.FYERS_ACCESS_TOKEN || '',
+      refreshToken: process.env.FYERS_REFRESH_TOKEN || '',
+      pin: process.env.FYERS_PIN || '',
+      redirectUri:
+        process.env.FYERS_REDIRECT_URI || EMPTY_FYERS.redirectUri
+    },
     kotak: {
       consumerKey: process.env.KOTAK_CONSUMER_KEY || '',
       ucc: process.env.KOTAK_UCC || '',
@@ -120,29 +171,72 @@ export async function loadPlatformBrokerFromDb() {
   seedRuntimeFromEnv();
   try {
     const doc = await Settings.findOne({ key: SETTINGS_KEY });
-    if (!doc?.value?.cipher) return getPlatformBrokerPublic();
+    if (!doc?.value?.cipher) {
+      applyPlatformBrokerToEnv();
+      return getPlatformBrokerPublic();
+    }
     const plain = decryptObject(doc.value.cipher);
-    if (!plain || typeof plain !== 'object') return getPlatformBrokerPublic();
+    if (!plain || typeof plain !== 'object') {
+      applyPlatformBrokerToEnv();
+      return getPlatformBrokerPublic();
+    }
     runtime = {
+      fyers: { ...EMPTY_FYERS, ...(plain.fyers || {}) },
       kotak: { ...EMPTY_KOTAK, ...(plain.kotak || {}) },
       upstox: { ...EMPTY_UPSTOX, ...(plain.upstox || {}) },
       updatedAt: doc.updatedAt || null
     };
+    // Env can fill gaps if admin never saved Fyers yet
+    if (!runtime.fyers.appId && process.env.FYERS_APP_ID) {
+      runtime.fyers.appId = process.env.FYERS_APP_ID;
+    }
+    if (!runtime.fyers.accessToken && process.env.FYERS_ACCESS_TOKEN) {
+      runtime.fyers.accessToken = process.env.FYERS_ACCESS_TOKEN;
+    }
+    if (!runtime.fyers.appSecret && process.env.FYERS_APP_SECRET) {
+      runtime.fyers.appSecret = process.env.FYERS_APP_SECRET;
+    }
+    if (!runtime.fyers.refreshToken && process.env.FYERS_REFRESH_TOKEN) {
+      runtime.fyers.refreshToken = process.env.FYERS_REFRESH_TOKEN;
+    }
+    if (!runtime.fyers.pin && process.env.FYERS_PIN) {
+      runtime.fyers.pin = process.env.FYERS_PIN;
+    }
     applyPlatformBrokerToEnv();
     console.log(
-      `[PlatformBroker] Loaded from admin store · Kotak=${runtime.kotak.consumerKey ? 'yes' : 'no'} · Upstox=${runtime.upstox.accessToken ? 'yes' : 'no'}`
+      `[PlatformBroker] Loaded · Fyers=${runtime.fyers.accessToken ? 'yes' : 'no'} · Kotak=${runtime.kotak.consumerKey ? 'yes' : 'no'} · Upstox=${runtime.upstox.accessToken ? 'yes' : 'no'}`
     );
   } catch (err) {
     console.warn('[PlatformBroker] load failed, using .env:', err.message);
+    applyPlatformBrokerToEnv();
   }
   return getPlatformBrokerPublic();
 }
 
 /**
- * Save Kotak + Upstox together (one admin submit).
+ * Save Fyers + Kotak + Upstox together (one admin submit).
  * Masked / empty secret fields keep previous values.
  */
-export async function savePlatformBroker({ kotak = {}, upstox = {} } = {}) {
+export async function savePlatformBroker({ fyers = {}, kotak = {}, upstox = {} } = {}) {
+  const nextFyers = mergeSecretFields(runtime.fyers, fyers, [
+    'appId',
+    'appSecret',
+    'accessToken',
+    'refreshToken',
+    'pin',
+    'redirectUri'
+  ]);
+  if (fyers.appId !== undefined && String(fyers.appId).trim() && !isMasked(fyers.appId)) {
+    nextFyers.appId = String(fyers.appId).trim();
+  }
+  if (
+    fyers.redirectUri !== undefined &&
+    String(fyers.redirectUri).trim() &&
+    !isMasked(fyers.redirectUri)
+  ) {
+    nextFyers.redirectUri = String(fyers.redirectUri).trim();
+  }
+
   const nextKotak = mergeSecretFields(runtime.kotak, kotak, [
     'consumerKey',
     'ucc',
@@ -150,23 +244,28 @@ export async function savePlatformBroker({ kotak = {}, upstox = {} } = {}) {
     'mpin',
     'totpKey'
   ]);
-  // ucc / mobile can be updated even if partially shown
   if (kotak.ucc !== undefined && String(kotak.ucc).trim() && !isMasked(kotak.ucc)) {
     nextKotak.ucc = String(kotak.ucc).trim();
   }
-  if (kotak.mobileNumber !== undefined && String(kotak.mobileNumber).trim() && !String(kotak.mobileNumber).includes('•')) {
+  if (
+    kotak.mobileNumber !== undefined &&
+    String(kotak.mobileNumber).trim() &&
+    !String(kotak.mobileNumber).includes('•')
+  ) {
     nextKotak.mobileNumber = String(kotak.mobileNumber).trim();
   }
 
   const nextUpstox = mergeSecretFields(runtime.upstox, upstox, ['accessToken']);
 
   runtime = {
+    fyers: nextFyers,
     kotak: nextKotak,
     upstox: nextUpstox,
     updatedAt: new Date()
   };
 
   const cipher = encryptObject({
+    fyers: nextFyers,
     kotak: nextKotak,
     upstox: nextUpstox
   });
@@ -179,23 +278,33 @@ export async function savePlatformBroker({ kotak = {}, upstox = {} } = {}) {
 
   applyPlatformBrokerToEnv();
 
-  // Re-login Kotak in background so Terminal / OF pick up new keys
   void kotakNeoService.login?.().catch((err) => {
     console.warn('[PlatformBroker] Kotak re-login:', err.message);
   });
 
-  // Soft-kick Order Flow to pick Upstox token on next provider start
   try {
     const { orderFlowService } = await import('./orderFlowService.js');
     if (orderFlowService?.state) {
       orderFlowService.state.lastError = null;
     }
-    // If OF was waiting on Upstox, try again without blocking the HTTP response
     if (!orderFlowService.getStatus?.()?.ready && process.env.UPSTOX_ACCESS_TOKEN) {
-      void orderFlowService.tryStartUpstox?.().then(() => {
-        orderFlowService.state.ready = true;
-        console.log('[PlatformBroker] Order Flow Upstox started after admin save');
-      }).catch(() => {});
+      void orderFlowService
+        .tryStartUpstox?.()
+        .then(() => {
+          orderFlowService.state.ready = true;
+          console.log('[PlatformBroker] Order Flow Upstox started after admin save');
+        })
+        .catch(() => {});
+    }
+  } catch {
+    /* optional */
+  }
+
+  // Kick market data to prefer Fyers without full process restart
+  try {
+    const { marketDataService } = await import('./marketDataService.js');
+    if (fyersService.configured && typeof marketDataService?.initFyersLiveFeed === 'function') {
+      void marketDataService.initFyersLiveFeed();
     }
   } catch {
     /* optional */

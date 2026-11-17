@@ -709,7 +709,7 @@ router.get('/public-signup-settings', (_req, res) => {
 
 router.post('/settings/broker', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { brokerProvider, dhanConfig, kotak, upstox } = req.body || {};
+    const { brokerProvider, dhanConfig, fyers, kotak, upstox } = req.body || {};
 
     // Legacy Dhan fields (kept for compatibility)
     if (brokerProvider) systemSettings.brokerProvider = brokerProvider;
@@ -721,10 +721,11 @@ router.post('/settings/broker', authMiddleware, adminOnly, async (req, res) => {
       systemSettings.dhanConfig = next;
     }
 
-    // Platform live feed: Kotak + Upstox in one save
+    // Platform live feed: Fyers (default) + Kotak + Upstox in one save
     let platformBroker = getPlatformBrokerPublic();
-    if (kotak || upstox) {
+    if (fyers || kotak || upstox) {
       platformBroker = await savePlatformBroker({
+        fyers: fyers || {},
         kotak: kotak || {},
         upstox: upstox || {}
       });
@@ -732,7 +733,7 @@ router.post('/settings/broker', authMiddleware, adminOnly, async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Kotak & Upstox credentials saved. Live feed will use the new keys.',
+      message: 'Broker credentials saved. Platform priority: Fyers → Upstox → Kotak.',
       settings: {
         ...maskBrokerSettings(systemSettings),
         platformBroker

@@ -6,6 +6,7 @@ import Home from '../Pages/Home';
 import Terminal from '../Pages/Terminal';
 import OpeningMomentum from '../Pages/OpeningMomentum';
 import MarketXRay from '../Pages/MarketXRay';
+import MarketAnalyse from '../Pages/MarketAnalyse';
 import UserDashboard from '../Pages/UserDashboard';
 import Pricing from '../Pages/Pricing';
 import MembershipCheckout from '../Pages/MembershipCheckout';
@@ -77,6 +78,22 @@ export default function AppRoutes() {
           element={
             <ProtectedRoute>
               <MarketXRay />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analyse"
+          element={
+            <ProtectedRoute>
+              <MarketAnalyse />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="market-analyse"
+          element={
+            <ProtectedRoute>
+              <MarketAnalyse />
             </ProtectedRoute>
           }
         />

@@ -213,7 +213,11 @@ io.on('connection', async (socket) => {
       screener: marketDataService.getScreenerData(),
       marketXRay: marketDataService.getMarketXRay(),
       openingMomentum: marketDataService.getOpeningMomentumData(),
-      feed: { mode: 'server', provider: 'kotak', label: 'Platform · Kotak' }
+      feed: {
+        mode: 'server',
+        provider: process.env.FYERS_ACCESS_TOKEN ? 'fyers' : 'kotak',
+        label: process.env.FYERS_ACCESS_TOKEN ? 'Platform · Fyers' : 'Platform · Kotak'
+      }
     });
   }
 

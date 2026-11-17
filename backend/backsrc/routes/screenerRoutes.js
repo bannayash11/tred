@@ -79,6 +79,23 @@ router.get('/market-xray', async (req, res) => {
   }
 });
 
+// Market Analyse report — bias + fixed pivot / S-R levels
+router.get('/market-analyse', async (req, res) => {
+  try {
+    const entitlements = entitlementsOr403(req, res, { needXRay: true });
+    if (!entitlements) return;
+    const timeframe = String(req.query.tf || req.query.timeframe || '5m').toLowerCase();
+    const rangeDays = Number(req.query.range || req.query.rangeDays || 10);
+    const { data, feed } = await byokMarketRuntime.getMarketAnalysisForUser(req.user, {
+      timeframe,
+      rangeDays
+    });
+    res.json({ success: true, data, feed });
+  } catch (err) {
+    sendByokError(res, err);
+  }
+});
+
 // Get Opening 5-Minute Momentum Scanner data
 router.get('/opening-momentum', async (req, res) => {
   try {

@@ -40,6 +40,23 @@ export interface FeedStatus {
   ready: boolean;
   session?: string;
   lastError: { message: string } | null;
+  feed?: { mode?: string; provider?: string | null; label?: string } | null;
+}
+
+function normalizeFeedStatus(raw: any): FeedStatus | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const feed = raw.feed && typeof raw.feed === 'object' ? raw.feed : null;
+  const p = raw.provider && typeof raw.provider === 'object' ? raw.provider : null;
+  const id = String(p?.id || feed?.provider || 'platform');
+  const label = String(p?.label || feed?.label || (feed?.mode === 'byok' ? `BYOK · ${id}` : 'Platform'));
+  const alwaysLive = Boolean(p?.alwaysLive ?? feed?.mode === 'byok');
+  return {
+    ready: Boolean(raw.ready),
+    session: raw.session,
+    lastError: raw.lastError ?? null,
+    feed,
+    provider: { id, label, alwaysLive },
+  };
 }
 
 let statusPromise: Promise<FeedStatus | null> | null = null;
@@ -47,6 +64,7 @@ let statusPromise: Promise<FeedStatus | null> | null = null;
 export function feedStatus(): Promise<FeedStatus | null> {
   statusPromise ??= ofFetch('/status', { cache: 'no-store' })
     .then((r) => (r.ok || r.status === 503 ? r.json() : null))
+    .then((raw) => normalizeFeedStatus(raw))
     .catch(() => null);
   return statusPromise;
 }
@@ -67,7 +85,7 @@ export function useFeedStatus(): FeedStatus | null {
 }
 
 const moving = (status: FeedStatus | null) =>
-  Boolean(status?.provider.alwaysLive) || isMarketSessionTime(Date.now());
+  Boolean(status?.provider?.alwaysLive) || isMarketSessionTime(Date.now());
 const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 
 export async function fetchMarket(signal?: AbortSignal): Promise<ContractMarket | null> {

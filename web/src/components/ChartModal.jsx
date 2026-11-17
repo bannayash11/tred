@@ -8,7 +8,8 @@ import {
   Layers,
   ArrowLeft,
   Smartphone,
-  Monitor
+  Monitor,
+  ChevronDown
 } from 'lucide-react';
 import { fetchStock, getSocket } from '../services/api';
 import { getMembership } from '../lib/membership';
@@ -23,14 +24,30 @@ import ManualKotakChart, {
 } from './ManualKotakChart';
 import ChartFullLoader from './ChartFullLoader';
 
-const OVERLAY_OPTIONS = [
-  { key: 'orderBlocks', label: 'Order Blocks', hint: 'Demand / supply zones' },
-  { key: 'liquidity', label: 'Liquidity', hint: 'Buy & sell side levels' },
-  { key: 'fvg', label: 'FVG', hint: 'Fair value gaps' },
+/** Your SMC / structure logic — always listed as chart options */
+const LOGIC_OPTIONS = [
+  { key: 'orderBlocks', label: 'Order Blocks', hint: 'Your demand / supply zone logic' },
+  { key: 'liquidity', label: 'Liquidity', hint: 'Your buy & sell side liquidity levels' },
+  { key: 'fvg', label: 'FVG', hint: 'Your fair value gap logic' },
   { key: 'sessionMarks', label: 'Session', hint: 'Day open marks' },
   { key: 'prevDayHL', label: 'Prev Day', hint: 'Previous day high / low' },
   { key: 'equalHL', label: 'Equal H/L', hint: 'Matching highs & lows' }
 ];
+
+/** Classic indicators from candle data (Fyers / broker) */
+const INDICATOR_OPTIONS = [
+  { key: 'ema9', label: 'EMA 9', hint: '9-period exponential moving average' },
+  { key: 'ema21', label: 'EMA 21', hint: '21-period exponential moving average' },
+  { key: 'sma20', label: 'SMA 20', hint: '20-period simple moving average' },
+  { key: 'sma50', label: 'SMA 50', hint: '50-period simple moving average' },
+  { key: 'bbands', label: 'Bollinger', hint: 'Bollinger Bands (20, 2)' },
+  { key: 'vwap', label: 'VWAP', hint: 'Session volume-weighted average price' },
+  { key: 'supertrend', label: 'Supertrend', hint: 'Supertrend (10, 3)' },
+  { key: 'macd', label: 'MACD', hint: 'MACD (12, 26, 9) — bottom pane' },
+  { key: 'rsi', label: 'RSI 14', hint: 'RSI (14) — bottom pane (hides MACD pane)' }
+];
+
+const OVERLAY_OPTIONS = [...LOGIC_OPTIONS, ...INDICATOR_OPTIONS];
 
 
 const ALL_TIMEFRAMES = ['1m', '3m', '5m', '15m'];
@@ -173,9 +190,13 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const [liveChange, setLiveChange] = useState(null);
   const [priceFlash, setPriceFlash] = useState(null); // 'up' | 'down' | null
   const [isMarketOpen, setIsMarketOpen] = useState(checkIsMarketOpen());
+  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const seriesRef = useRef(null);
   const currentCandleRef = useRef(null);
+  const indicatorSeriesRef = useRef(null);
+  const indicatorMenuRef = useRef(null);
   const rangeDays = RANGE_OPTIONS.find((r) => r.key === rangeKey)?.days || 5;
+  const activeIndicators = INDICATOR_OPTIONS.filter((opt) => overlays[opt.key]);
 
   const nearestLevel = useMemo(() => {
     const px = livePrice ?? stockData?.currentPrice;
@@ -194,6 +215,17 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
     }, 15000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!indicatorMenuOpen) return undefined;
+    const onDoc = (e) => {
+      if (indicatorMenuRef.current && !indicatorMenuRef.current.contains(e.target)) {
+        setIndicatorMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [indicatorMenuOpen]);
 
   const useClientBrokerChart = isByokChartUser(authUser);
 
@@ -217,7 +249,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
 
     const emptyMsg = useClientBrokerChart
       ? 'No candles from your broker yet. Check token / market hours.'
-      : 'Live candle data unavailable from Kotak & Upstox. Try again shortly…';
+      : 'Live candle data unavailable. Try again shortly…';
 
     (async () => {
       let lastErr = null;
@@ -292,14 +324,16 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
       });
       setLiveChange(newChange);
 
-      // Live candle updates during NSE session
+      // Live candle + EMA tip updates during NSE session (Fyers / platform ticks)
       const nowSec = Math.floor(Date.now() / 1000);
       if (!isNseSessionCandle(nowSec) || !seriesRef.current) return;
 
       const bucket = getIstBucketStart(nowSec, timeframe);
       const cur = currentCandleRef.current;
+      const ind = indicatorSeriesRef.current;
+      const newBar = !cur || cur.time !== bucket;
 
-      if (!cur || cur.time !== bucket) {
+      if (newBar) {
         const fresh = sanitizeCandle({
           time: bucket,
           open: newPrice,
@@ -310,19 +344,42 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
         if (!fresh) return;
         currentCandleRef.current = fresh;
         seriesRef.current.update(fresh);
-        return;
+      } else {
+        const updated = sanitizeCandle({
+          time: cur.time,
+          open: cur.open,
+          high: Math.max(cur.high, newPrice),
+          low: Math.min(cur.low, newPrice),
+          close: newPrice
+        });
+        if (!updated) return;
+        currentCandleRef.current = updated;
+        seriesRef.current.update(updated);
       }
 
-      const updated = sanitizeCandle({
-        time: cur.time,
-        open: cur.open,
-        high: Math.max(cur.high, newPrice),
-        low: Math.min(cur.low, newPrice),
-        close: newPrice
-      });
-      if (!updated) return;
-      currentCandleRef.current = updated;
-      seriesRef.current.update(updated);
+      // Keep EMA lines moving with LTP on the active bar
+      if (ind?.ema9 && Number.isFinite(ind.baseEma9)) {
+        if (newBar && Number.isFinite(ind.lastEma9)) ind.baseEma9 = ind.lastEma9;
+        const k9 = 2 / (9 + 1);
+        const next9 = newPrice * k9 + ind.baseEma9 * (1 - k9);
+        ind.lastEma9 = next9;
+        try {
+          ind.ema9.update({ time: bucket, value: next9 });
+        } catch {
+          /* ignore */
+        }
+      }
+      if (ind?.ema21 && Number.isFinite(ind.baseEma21)) {
+        if (newBar && Number.isFinite(ind.lastEma21)) ind.baseEma21 = ind.lastEma21;
+        const k21 = 2 / (21 + 1);
+        const next21 = newPrice * k21 + ind.baseEma21 * (1 - k21);
+        ind.lastEma21 = next21;
+        try {
+          ind.ema21.update({ time: bucket, value: next21 });
+        } catch {
+          /* ignore */
+        }
+      }
     };
 
     socket.on('MARKET_TICK', handleTick);
@@ -338,12 +395,12 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const currentDisplayChange = liveChange ?? stockData?.change;
 
   const shellClass = asPage
-    ? `relative flex w-full flex-col rounded-2xl sm:rounded-3xl border border-slate-800 bg-[#0a0f1d] shadow-xl ${
+    ? `relative flex w-full flex-col rounded-2xl sm:rounded-3xl border border-[#2a2e39] bg-[#131722] shadow-xl ${
         useDesktopLayout
-          ? 'min-h-[calc(100vh-11rem)] overflow-hidden'
+          ? 'h-[calc(100dvh-10.5rem)] max-h-[calc(100dvh-10.5rem)] overflow-hidden'
           : 'min-h-0 overflow-x-hidden overflow-y-auto'
       }`
-    : `relative flex w-full max-w-6xl flex-col border-slate-800 bg-[#0a0f1d] shadow-2xl overflow-hidden ${
+    : `relative flex w-full max-w-5xl flex-col border-[#2a2e39] bg-[#131722] shadow-2xl overflow-hidden ${
         useDesktopLayout
           ? 'h-[100dvh] sm:h-[90vh] rounded-none sm:rounded-3xl border-0 sm:border'
           : 'h-[100dvh] max-h-[100dvh] rounded-none border-0'
@@ -355,7 +412,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
           <ChartFullLoader symbol={symbol} timeframe={timeframe} rangeKey={rangeKey} />
         ) : null}
         {/* Header */}
-        <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 px-3 sm:px-6 py-3 sm:py-4 bg-slate-900/50">
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2e39] px-3 sm:px-6 py-3 sm:py-4 bg-[#1e222d]">
           <div className="flex items-center space-x-2 sm:space-x-4 min-w-0 flex-1">
             {asPage && (
               <button
@@ -391,11 +448,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                     LIVE
                   </span>
                 )}
-                {stockData?.chartProvider === 'upstox' && (
-                  <span className="rounded bg-amber-950/80 px-2 py-0.5 text-[10px] font-bold text-amber-400 border border-amber-800/50">
-                    UPSTOX
-                  </span>
-                )}
+                {/* Broker name stays backend-only — users just see LIVE */}
               </div>
               <p className="text-xs text-slate-400 truncate">{stockData?.name}</p>
             </div>
@@ -514,13 +567,14 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
         </div>
 
         {/* Toolbar */}
-        <div className="shrink-0 space-y-2 border-b border-slate-800/80 px-3 sm:px-5 py-2 sm:py-2.5 bg-slate-950/70">
+        <div className="shrink-0 space-y-2 border-b border-[#2a2e39] px-3 sm:px-5 py-2 sm:py-2.5 bg-[#131722]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md border border-cyan-800/40 bg-cyan-950/40 px-2 py-1 text-[10px] font-semibold text-cyan-200">
+                {useClientBrokerChart ? 'Your broker' : 'Live chart'}
+              </span>
               <span className="hidden sm:inline text-[10px] text-slate-500">
-                {useClientBrokerChart
-                  ? 'BYOK · chart from your broker'
-                  : 'Platform feed · structure lines'}
+                SMC logic + Indicators · real-time candles
               </span>
             </div>
             <span className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-medium text-slate-400">
@@ -555,26 +609,90 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               })}
             </div>
 
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="mr-1 text-[10px] font-medium text-slate-500">Range</span>
-              {RANGE_OPTIONS.map((opt) => {
-                const active = rangeKey === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => setRangeKey(opt.key)}
-                    className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
-                      active
-                        ? 'bg-amber-500 text-black'
-                        : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Indicators dropdown — NOT "Indices" (Nifty/BankNifty). Select EMA/RSI etc. */}
+              <div className="relative" ref={indicatorMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIndicatorMenuOpen((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    activeIndicators.length
+                      ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-200'
+                      : 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
+                  }`}
+                  title="Technical indicators (EMA, RSI) — not market indices"
+                >
+                  Indicators
+                  {activeIndicators.length > 0 && (
+                    <span className="rounded bg-cyan-500/30 px-1 text-[10px] text-cyan-100">
+                      {activeIndicators.length}
+                    </span>
+                  )}
+                  <ChevronDown className={`h-3 w-3 opacity-70 ${indicatorMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {indicatorMenuOpen && (
+                  <div className="absolute right-0 z-40 mt-1.5 w-56 max-h-72 overflow-y-auto rounded-lg border border-slate-700 bg-[#0c1220] p-2 shadow-xl shadow-black/40">
+                    <div className="px-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-400/90">
+                      Select indicators
+                    </div>
+                    <p className="px-1.5 pb-2 text-[10px] leading-snug text-slate-500">
+                      These are chart studies (EMA / RSI), not Indices like Nifty.
+                    </p>
+                    <div className="space-y-0.5">
+                      {INDICATOR_OPTIONS.map((opt) => {
+                        const on = Boolean(overlays[opt.key]);
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            title={opt.hint}
+                            onClick={() => toggleOverlay(opt.key)}
+                            className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-[12px] transition-colors ${
+                              on
+                                ? 'bg-cyan-500/15 text-cyan-100'
+                                : 'text-slate-300 hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <span>
+                              <span className="font-semibold">{opt.label}</span>
+                              <span className="mt-0.5 block text-[10px] text-slate-500">{opt.hint}</span>
+                            </span>
+                            <span
+                              className={`ml-2 h-4 w-4 shrink-0 rounded border ${
+                                on
+                                  ? 'border-cyan-400 bg-cyan-400'
+                                  : 'border-slate-600 bg-transparent'
+                              }`}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="mr-1 text-[10px] font-medium text-slate-500">Range</span>
+                {RANGE_OPTIONS.map((opt) => {
+                  const active = rangeKey === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setRangeKey(opt.key)}
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                        active
+                          ? 'bg-amber-500 text-black'
+                          : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -587,12 +705,12 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
           }`}
         >
           <div
-            className={`relative flex-1 min-w-0 min-h-0 bg-[#090d16] p-2 sm:p-4 flex flex-col ${
+            className={`relative flex-1 min-w-0 min-h-0 bg-[#131722] p-1 sm:p-2 flex flex-col ${
               useDesktopLayout
                 ? 'h-full'
                 : asPage
-                  ? 'min-h-[55vh]'
-                  : 'min-h-[42vh] max-h-[52vh] shrink-0'
+                  ? 'h-[min(52dvh,28rem)] shrink-0'
+                  : 'h-[min(42dvh,24rem)] shrink-0'
             }`}
           >
             <ManualKotakChart
@@ -602,27 +720,29 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
               error={fetchError}
               seriesRef={seriesRef}
               currentCandleRef={currentCandleRef}
+              indicatorSeriesRef={indicatorSeriesRef}
               asPage={asPage || useDesktopLayout}
               overlays={overlays}
               fillContainer
+              layoutKey={useDesktopLayout ? 'desktop' : 'mobile'}
             />
           </div>
 
           <div
-            className={`border-slate-800/70 bg-[#0a0f18] px-3.5 py-3.5 space-y-3 ${
+            className={`border-[#2a2e39] bg-[#1e222d] px-3.5 py-3.5 space-y-3 ${
               useDesktopLayout
-                ? 'w-72 xl:w-80 shrink-0 border-l overflow-y-auto h-full'
+                ? 'w-56 xl:w-64 shrink-0 border-l overflow-y-auto h-full'
                 : 'w-full border-t overflow-visible'
             }`}
           >
             <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-slate-200">Structure &amp; Levels</h3>
+              <h3 className="text-[11px] font-semibold text-slate-200">Chart options</h3>
               <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-                Educational chart studies only — not investment advice.
+                Your SMC logic + indicators · educational only — not investment advice.
               </p>
             </div>
 
-            <div className="rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2.5 space-y-2.5">
+            <div className="rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2.5 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] font-semibold text-slate-200">Show on chart</div>
@@ -647,25 +767,66 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {OVERLAY_OPTIONS.map((opt) => {
-                    const on = Boolean(overlays[opt.key]);
-                    return (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        title={opt.hint}
-                        onClick={() => toggleOverlay(opt.key)}
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors border ${
-                          on
-                            ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
-                            : 'border-slate-700/80 bg-slate-900/50 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
+
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-400/80">
+                    My logic (SMC)
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {LOGIC_OPTIONS.map((opt) => {
+                      const on = Boolean(overlays[opt.key]);
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          title={opt.hint}
+                          onClick={() => toggleOverlay(opt.key)}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors border ${
+                            on
+                              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
+                              : 'border-slate-700/80 bg-slate-900/50 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 border-t border-slate-800/60 pt-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400/80">
+                      Indicators
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIndicatorMenuOpen(true)}
+                      className="text-[10px] font-medium text-cyan-300/90 hover:text-cyan-200"
+                    >
+                      Open dropdown ↑
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Not Indices (Nifty/BankNifty). Use toolbar <span className="text-cyan-300/80">Indicators</span> to select EMA / RSI.
+                  </p>
+                  {activeIndicators.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {activeIndicators.map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          title={`Remove ${opt.label}`}
+                          onClick={() => toggleOverlay(opt.key)}
+                          className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-1 text-[11px] font-medium text-cyan-200"
+                        >
+                          {opt.label} ×
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-600">No indicator selected yet.</p>
+                  )}
                 </div>
               </div>
 

@@ -41,7 +41,8 @@ router.get('/status', async (req, res) => {
   try {
     const ctx = await byokOrderFlowRuntime.resolve(req.user);
     const status = byokOrderFlowRuntime.getStatus(ctx);
-    if (!status.ready && status.lastError) {
+    // Board can still serve platform market while a BYOK adapter is warming.
+    if (!status.ready && status.lastError && !orderFlowService.getStatus()?.ready) {
       return res.status(503).json(status);
     }
     res.json(status);
@@ -66,22 +67,12 @@ router.get('/universe', async (req, res) => {
 
 router.get('/market', async (req, res) => {
   try {
-    const ctx = await byokOrderFlowRuntime.resolve(req.user);
-    if (ctx.mode === 'byok' && ctx.handle && !ctx.handle.ready && ctx.handle.lastError) {
-      return res.status(503).json({
-        error: ctx.handle.lastError.message,
-        feed: ctx.feed,
-        retryAfter: 10
-      });
-    }
-    // Shared board file for now; BYOK Upstox users still get feed tag via status.
-    // Per-user OF board rebuild is rate-limit heavy — status/futures use user token.
+    // Fast path: shared live board. Status endpoint owns platform vs BYOK labeling.
     const json = orderFlowService.getMarketJson();
     if (!json) {
       const status = orderFlowService.getStatus();
       return res.status(503).json({
         error: status.lastError?.message || 'The first market file is still being built.',
-        feed: ctx.feed,
         retryAfter: 5
       });
     }
@@ -124,12 +115,13 @@ router.get('/futures/:symbol', async (req, res) => {
     const session =
       req.query.session ||
       orderFlowService.getStatus().session;
+    // Shared cache / Kotak-or-Upstox platform pipe — fast for every plan.
     const payload = await orderFlowService.getFutures(symbol, session);
     res.json(payload);
   } catch (err) {
     const code = err.statusCode || 502;
     res.status(code).json({
-      error: err.statusCode ? err.message : 'Kotak did not answer for this underlying.'
+      error: err.statusCode ? err.message : 'Broker did not answer for this underlying.'
     });
   }
 });

@@ -36,42 +36,30 @@ class ByokOrderFlowRuntime {
     const userId = String(user._id || user.id);
     this.gc();
 
+    // Board data is always the shared platform Order Flow file (fast).
+    // BYOK only tags the feed + gates access; do not block on Upstox instrument maps.
     if (feed.provider === 'upstox') {
       let handle = this.handles.get(userId);
       if (!handle || handle.providerId !== 'upstox') {
-        const universe = orderFlowService.getUniverse?.() || orderFlowService.universe || [];
-        const list =
-          universe.length > 0
-            ? universe
-            : [
-                { symbol: 'NIFTY', exch: 'NSE' },
-                { symbol: 'BANKNIFTY', exch: 'NSE' },
-                { symbol: 'RELIANCE', exch: 'NSE' },
-                { symbol: 'SBIN', exch: 'NSE' },
-                { symbol: 'HDFCBANK', exch: 'NSE' },
-                { symbol: 'INFY', exch: 'NSE' },
-                { symbol: 'TCS', exch: 'NSE' }
-              ];
-        const upstox = createUpstoxOrderFlowProvider(list, {
-          accessToken: feed.session?.accessToken || feed.secrets?.accessToken
-        });
-        await upstox.init();
         handle = {
           providerId: 'upstox',
-          provider: upstox,
+          provider: null,
           feed: feed.feed,
           lastTouch: Date.now(),
           ready: true,
-          lastError: null
+          lastError: null,
+          accessToken: feed.session?.accessToken || feed.secrets?.accessToken || null
         };
         this.handles.set(userId, handle);
+        // Warm Upstox adapter in the background (optional); never delay /status or /market.
+        void this._warmUpstox(userId, feed).catch(() => {});
       }
       handle.lastTouch = Date.now();
+      handle.feed = feed.feed;
       return { mode: 'byok', feed: feed.feed, handle };
     }
 
-    // Kotak / Groww / Angel — reuse platform market board for display but tag feed;
-    // futures/chain for non-Upstox BYOK still need dedicated OF adapters.
+    // Kotak / Groww / Angel BYOK — same shared board, tagged as BYOK.
     return {
       mode: 'byok',
       feed: feed.feed,
@@ -79,25 +67,69 @@ class ByokOrderFlowRuntime {
         providerId: feed.provider,
         provider: null,
         feed: feed.feed,
-        ready: false,
-        lastError: {
-          message: `Order Flow live board for ${feed.provider} BYOK is not fully wired yet. Use Upstox BYOK for Order Flow, or a Platform plan.`
-        }
+        ready: true,
+        lastError: null
       }
     };
   }
 
+  async _warmUpstox(userId, feed) {
+    const universe = orderFlowService.getUniverse?.() || orderFlowService.universe || [];
+    const list =
+      universe.length > 0
+        ? universe
+        : [
+            { symbol: 'NIFTY', exch: 'NSE' },
+            { symbol: 'BANKNIFTY', exch: 'NSE' },
+            { symbol: 'RELIANCE', exch: 'NSE' },
+            { symbol: 'SBIN', exch: 'NSE' },
+            { symbol: 'HDFCBANK', exch: 'NSE' },
+            { symbol: 'INFY', exch: 'NSE' },
+            { symbol: 'TCS', exch: 'NSE' }
+          ];
+    const upstox = createUpstoxOrderFlowProvider(list, {
+      accessToken: feed.session?.accessToken || feed.secrets?.accessToken
+    });
+    await upstox.init();
+    const handle = this.handles.get(userId);
+    if (handle && handle.providerId === 'upstox') {
+      handle.provider = upstox;
+      handle.ready = true;
+      handle.lastTouch = Date.now();
+    }
+  }
+
   getStatus(ctx) {
+    const base = orderFlowService.getStatus() || {};
     if (ctx.mode === 'server') {
-      return { ...orderFlowService.getStatus(), feed: ctx.feed };
+      const feed = ctx.feed || { mode: 'server', provider: base.provider?.id || 'kotak', label: 'Platform' };
+      return {
+        ...base,
+        feed,
+        // FlowStatus expects { id, label, alwaysLive }
+        provider: {
+          id: base.provider?.id || feed.provider || 'kotak',
+          label: feed.label || base.provider?.label || 'Platform',
+          alwaysLive: Boolean(base.provider?.alwaysLive)
+        }
+      };
     }
     const h = ctx.handle;
+    const feed = ctx.feed || h?.feed || { mode: 'byok', provider: h?.providerId || null, label: 'BYOK' };
+    const providerId = h?.providerId || feed.provider || 'byok';
+    // Use platform board readiness — BYOK is a feed tag, not a separate slow pipe.
     return {
-      ready: !!h?.ready,
-      feed: ctx.feed || h?.feed,
-      provider: h?.feed || ctx.feed,
-      lastError: h?.lastError || null,
-      session: orderFlowService.getStatus()?.session || null
+      ...base,
+      ready: Boolean(base.ready || h?.ready),
+      feed,
+      provider: {
+        id: providerId,
+        label: feed.label || `BYOK · ${providerId}`,
+        // Match platform cadence — alwaysLive would spam futures polls.
+        alwaysLive: Boolean(base.provider?.alwaysLive)
+      },
+      lastError: h?.lastError || base.lastError || null,
+      session: base.session || null
     };
   }
 }

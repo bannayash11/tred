@@ -7,7 +7,7 @@
   "scripts": {
     "build": "echo 'No build step required'",
     "start": "node server.js",
-    "dev": "nodemon backsrc/server.js"
+    "dev": "nodemon --config nodemon.json backsrc/server.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

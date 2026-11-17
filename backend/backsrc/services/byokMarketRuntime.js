@@ -3,6 +3,11 @@
  * driven by the user's connected broker (never platform keys).
  */
 import { smcEngine } from '../algorithms/smcEngine.js';
+import {
+  analyzeInstrument,
+  analyzeFnoUniverseFromStocks,
+  buildMarketAnalysisReport
+} from '../algorithms/marketAnalysisEngine.js';
 import { openingMomentumService } from './openingMomentumService.js';
 import { FNO_UNIVERSE, marketDataService } from './marketDataService.js';
 import { createByokMarketAdapter } from './marketBrokers/index.js';
@@ -114,6 +119,90 @@ class ByokUserSession {
 
   getOpeningMomentumData() {
     return openingMomentumService.getLiveRankings(this.stocks);
+  }
+
+  async getMarketAnalysis(options = {}) {
+    const timeframe = options.timeframe || '5m';
+    const rangeDays = options.rangeDays || 10;
+    const aliases = {
+      'NIFTY 50': ['NIFTY 50', 'NIFTY'],
+      BANKNIFTY: ['BANKNIFTY', 'BANK NIFTY']
+    };
+
+    const load = async (preferred) => {
+      for (const sym of aliases[preferred] || [preferred]) {
+        const detail = await this.getStockDetails(sym, { timeframe, rangeDays });
+        if (detail?.candles?.length || detail?.currentPrice) return detail;
+      }
+      // Fall back to in-memory quote even without candles
+      const stock = this.stocks.get(preferred) || this.stocks.get(aliases[preferred]?.[1]);
+      if (!stock) return null;
+      return {
+        symbol: stock.symbol,
+        name: stock.name,
+        candles: stock.candles || [],
+        currentPrice: stock.currentPrice,
+        dayOpen: stock.dayOpen,
+        high: stock.high,
+        low: stock.low,
+        change: stock.change,
+        smcData: stock.smcData
+      };
+    };
+
+    const [niftyDetail, bankDetail] = await Promise.all([
+      load('NIFTY 50'),
+      load('BANKNIFTY')
+    ]);
+
+    const nifty = niftyDetail
+      ? analyzeInstrument({
+          symbol: niftyDetail.symbol,
+          name: niftyDetail.name,
+          candles: niftyDetail.candles || [],
+          currentPrice: niftyDetail.currentPrice,
+          dayOpen: niftyDetail.dayOpen,
+          high: niftyDetail.high,
+          low: niftyDetail.low,
+          change: niftyDetail.change,
+          smcData: niftyDetail.smcData
+        })
+      : null;
+
+    const bankNifty = bankDetail
+      ? analyzeInstrument({
+          symbol: bankDetail.symbol,
+          name: bankDetail.name,
+          candles: bankDetail.candles || [],
+          currentPrice: bankDetail.currentPrice,
+          dayOpen: bankDetail.dayOpen,
+          high: bankDetail.high,
+          low: bankDetail.low,
+          change: bankDetail.change,
+          smcData: bankDetail.smcData
+        })
+      : null;
+
+    const xray = this.getMarketXRay();
+    const fnoUniverse = analyzeFnoUniverseFromStocks(this.stocks);
+    return {
+      ...buildMarketAnalysisReport({
+        nifty,
+        bankNifty,
+        breadth: {
+          advancing: xray.advancing,
+          declining: xray.declining,
+          neutral: xray.neutral,
+          advanceDeclineRatio: xray.advanceDeclineRatio,
+          bullishSetupsCount: xray.bullishSetupsCount,
+          bearishSetupsCount: xray.bearishSetupsCount
+        },
+        fnoUniverse
+      }),
+      timeframe,
+      rangeDays,
+      isLive: true
+    };
   }
 
   async refreshQuotes() {
@@ -617,6 +706,22 @@ class ByokMarketRuntime {
       throw err;
     }
     return session.getStockDetails(symbol, options);
+  }
+
+  async getMarketAnalysisForUser(user, options = {}) {
+    const { mode, feed, session, error } = await this.getSessionForUser(user);
+    if (mode === 'server') {
+      const data = await marketDataService.getMarketAnalysis(options);
+      return { data, feed };
+    }
+    if (error || !session) {
+      const err = new Error(error || 'BYOK broker not connected');
+      err.statusCode = 403;
+      err.feed = feed;
+      throw err;
+    }
+    const data = await session.getMarketAnalysis(options);
+    return { data, feed };
   }
 }
 

@@ -1,6 +1,12 @@
 import { smcEngine } from '../algorithms/smcEngine.js';
+import {
+  analyzeInstrument,
+  analyzeFnoUniverseFromStocks,
+  buildMarketAnalysisReport
+} from '../algorithms/marketAnalysisEngine.js';
 import { openingMomentumService } from './openingMomentumService.js';
 import { kotakNeoService } from './kotakNeoService.js';
+import { fyersService } from './fyersService.js';
 import { orderFlowService } from './orderFlowService.js';
 
 const IST_TZ = 'Asia/Kolkata';
@@ -207,7 +213,7 @@ export class MarketDataService {
     if (this.initialized) return;
     this.io = ioInstance;
 
-    console.log('[MarketDataService] Initializing F&O universe (live Kotak only — no dummy candles)...');
+    console.log('[MarketDataService] Initializing F&O universe (Fyers → Upstox → Kotak — no dummy candles)...');
 
     for (const stock of FNO_UNIVERSE) {
       this.stocks.set(stock.symbol, {
@@ -225,18 +231,82 @@ export class MarketDataService {
     }
 
     this.initialized = true;
-    console.log(`[MarketDataService] Initialized ${this.stocks.size} F&O symbols (awaiting Kotak live quotes).`);
+    console.log(`[MarketDataService] Initialized ${this.stocks.size} F&O symbols (awaiting live quotes).`);
 
     // Init Opening Momentum engine — do NOT freeze here (prices are still 0).
-    // Auto-freeze runs after Kotak quotes calibrate / at 09:20 IST.
+    // Auto-freeze runs after live quotes calibrate / at 09:20 IST.
     await openingMomentumService.initialize(this.io);
 
-    // Initialize Kotak Neo Live Market Feed
-    this.initKotakLiveFeed();
+    // Primary: Fyers · Fallback: Kotak Neo
+    const fyersReady = await this.initFyersLiveFeed();
+    if (!fyersReady) {
+      this.initKotakLiveFeed();
+    }
   }
 
   /**
-   * Connect to real Kotak Neo live market feed and disable simulation
+   * Platform default: Fyers live quotes + candle warm.
+   * @returns {Promise<boolean>} true when Fyers feed is active
+   */
+  async initFyersLiveFeed() {
+    const appId = process.env.FYERS_APP_ID || fyersService.appId;
+    const token = process.env.FYERS_ACCESS_TOKEN || fyersService.accessToken;
+    if (!appId || !token) {
+      console.warn('[MarketDataService] No Fyers credentials — trying Kotak fallback.');
+      return false;
+    }
+
+    fyersService.applyCredentials({
+      appId,
+      appSecret: process.env.FYERS_APP_SECRET || fyersService.appSecret,
+      accessToken: token,
+      refreshToken: process.env.FYERS_REFRESH_TOKEN || fyersService.refreshToken,
+      pin: process.env.FYERS_PIN || fyersService.pin
+    });
+
+    const ok = await fyersService.ensureSession();
+    if (!ok || !fyersService.configured) {
+      console.warn('[MarketDataService] Fyers session not ready — trying Kotak fallback.');
+      return false;
+    }
+
+    await this.activateFyersLiveFeed();
+    return true;
+  }
+
+  async activateFyersLiveFeed() {
+    console.log('🔥 [MarketDataService] FYERS LIVE NSE DATA CONNECTED (platform default)!');
+    this.isRealData = true;
+    this.activeFeedProvider = 'fyers';
+
+    fyersService.setUniverse(Array.from(this.stocks.keys()));
+
+    try {
+      const ticks = await fyersService.fetchLiveQuotes();
+      if (ticks?.length) {
+        for (const t of ticks) {
+          const stock = this.stocks.get(t.symbol);
+          if (!stock) continue;
+          stock.currentPrice = t.currentPrice;
+          stock.high = t.high || t.currentPrice;
+          stock.low = t.low || t.currentPrice;
+          stock.dayOpen = t.open || t.currentPrice;
+          stock.change = t.change;
+          stock.volume = t.volume || 0;
+        }
+        console.log(`[MarketDataService] Calibrated Fyers quotes for ${ticks.length} symbols.`);
+      }
+    } catch (calibErr) {
+      console.error('[MarketDataService] Fyers calibration error:', calibErr.message);
+    }
+
+    openingMomentumService.startScheduler(() => this.stocks);
+    fyersService.startLiveFeed((ticks) => this.handleRealTicks(ticks));
+    void this.warmRealCandles();
+  }
+
+  /**
+   * Connect to Kotak Neo live market feed (fallback when Fyers unavailable)
    */
   async initKotakLiveFeed() {
     const hasCredentials =
@@ -272,8 +342,14 @@ export class MarketDataService {
   }
 
   async activateKotakLiveFeed() {
-    console.log('🔥 [MarketDataService] REAL LIVE NSE DATA CONNECTED!');
+    // Don't steal the feed if Fyers is already primary
+    if (this.activeFeedProvider === 'fyers' && fyersService.configured) {
+      console.log('[MarketDataService] Kotak online but Fyers remains primary feed.');
+      return;
+    }
+    console.log('🔥 [MarketDataService] REAL LIVE NSE DATA CONNECTED (Kotak)!');
     this.isRealData = true;
+    this.activeFeedProvider = 'kotak';
 
     try {
       const initialQuotes = await kotakNeoService.fetchLiveQuotes();
@@ -309,7 +385,7 @@ export class MarketDataService {
     openingMomentumService.startScheduler(() => this.stocks);
 
     kotakNeoService.startLiveFeed((ticks) => this.handleRealTicks(ticks));
-    // Warm real 5m history from Kotak (not generated)
+    // Warm real 5m history
     void this.warmRealCandles();
   }
 
@@ -338,7 +414,10 @@ export class MarketDataService {
         if (!orderFlowService._prefetching) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
-      console.log('[MarketDataService] Warming real 5m candles from Kotak (throttled)…');
+      const preferFyers = this.activeFeedProvider === 'fyers' || fyersService.configured;
+      console.log(
+        `[MarketDataService] Warming real 5m candles from ${preferFyers ? 'Fyers' : 'Kotak'} (throttled)…`
+      );
       let consecutive429 = 0;
       const symbols = Array.from(this.stocks.values()).filter((s) => s.sector !== 'Indices');
       const priority = ['NIFTY 50', 'BANKNIFTY', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN'];
@@ -355,13 +434,33 @@ export class MarketDataService {
           console.warn('[MarketDataService] Pausing candle warm after repeated 429s — will retry shortly.');
           break;
         }
-        const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
-        if (!mapping) continue;
         try {
-          const realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
-            timeframe: '5m',
-            rangeDays: 2
-          });
+          let realCandles = [];
+          if (preferFyers && fyersService.configured) {
+            try {
+              realCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
+                timeframe: '5m',
+                rangeDays: 2
+              });
+            } catch (fyErr) {
+              console.warn(`[MarketDataService] Fyers warm ${stock.symbol}:`, fyErr.message);
+            }
+          }
+          if (!realCandles?.length) {
+            const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
+            if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
+              realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
+                timeframe: '5m',
+                rangeDays: 2
+              });
+            }
+          }
+          if (!realCandles?.length) {
+            realCandles = await this._fetchUpstoxCandles(stock.symbol, {
+              timeframe: '5m',
+              rangeDays: 2
+            });
+          }
           consecutive429 = 0;
           if (realCandles?.length) {
             const candles = filterNseSessionCandles(realCandles, '5m');
@@ -371,12 +470,13 @@ export class MarketDataService {
               stock.high = Math.max(...candles.map((c) => c.high));
               stock.low = Math.min(...candles.map((c) => c.low));
               stock.smcData = smcEngine.analyze(candles, stock.symbol, '5m');
-              // Seed chart cache so opening chart doesn't re-hit Kotak (429 / empty first load).
+              // Seed chart cache so opening chart doesn't re-hit broker on first load.
               stock.chartCache = {
                 key: '5m:2',
                 candles,
                 smcData: stock.smcData,
-                fetchedAt: Date.now()
+                fetchedAt: Date.now(),
+                provider: preferFyers ? 'fyers' : 'kotak'
               };
               warmed += 1;
               // Push setups to Terminal as soon as a few names have SMC.
@@ -865,23 +965,32 @@ export class MarketDataService {
       if (!fetchPromise) {
         fetchPromise = (async () => {
           let filtered = [];
-          let provider = 'kotak';
+          let provider = 'fyers';
 
-          const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
-          if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
+          // 1) Fyers (platform default)
+          if (fyersService.configured || process.env.FYERS_ACCESS_TOKEN) {
             try {
-              const realCandles = await kotakNeoService.fetchHistoricalCandles(
-                mapping.segment,
-                mapping.token,
-                { timeframe, rangeDays }
-              );
-              filtered = filterNseSessionCandles(realCandles || [], timeframe);
+              if (!fyersService.configured) {
+                fyersService.applyCredentials({
+                  appId: process.env.FYERS_APP_ID || '',
+                  appSecret: process.env.FYERS_APP_SECRET || '',
+                  accessToken: process.env.FYERS_ACCESS_TOKEN || '',
+                  refreshToken: process.env.FYERS_REFRESH_TOKEN || '',
+                  pin: process.env.FYERS_PIN || ''
+                });
+              }
+              const fyCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
+                timeframe,
+                rangeDays
+              });
+              filtered = filterNseSessionCandles(fyCandles || [], timeframe);
+              if (filtered.length) provider = 'fyers';
             } catch (e) {
-              console.warn(`[MarketDataService] Kotak chart ${stock.symbol}:`, e.message);
+              console.warn(`[MarketDataService] Fyers chart ${stock.symbol}:`, e.message);
             }
           }
 
-          // Kotak empty / failed → try platform Upstox
+          // 2) Upstox fallback
           if (!filtered.length) {
             const upCandles = await this._fetchUpstoxCandles(stock.symbol, {
               timeframe,
@@ -893,6 +1002,24 @@ export class MarketDataService {
               console.log(
                 `[MarketDataService] Chart ${stock.symbol} ${timeframe}/${rangeDays}d via Upstox fallback`
               );
+            }
+          }
+
+          // 3) Kotak last resort
+          if (!filtered.length) {
+            const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
+            if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
+              try {
+                const realCandles = await kotakNeoService.fetchHistoricalCandles(
+                  mapping.segment,
+                  mapping.token,
+                  { timeframe, rangeDays }
+                );
+                filtered = filterNseSessionCandles(realCandles || [], timeframe);
+                if (filtered.length) provider = 'kotak';
+              } catch (e) {
+                console.warn(`[MarketDataService] Kotak chart ${stock.symbol}:`, e.message);
+              }
             }
           }
 
@@ -958,6 +1085,70 @@ export class MarketDataService {
    */
   getOpeningMomentumData() {
     return openingMomentumService.getLiveRankings(this.stocks);
+  }
+
+  /**
+   * Market analyse report: Nifty + BankNifty bias, pivots, up/down scenarios.
+   */
+  async getMarketAnalysis(options = {}) {
+    const timeframe = options.timeframe || '5m';
+    const rangeDays = options.rangeDays || 10;
+
+    const [niftyDetail, bankDetail] = await Promise.all([
+      this.getStockDetails('NIFTY 50', { timeframe, rangeDays }),
+      this.getStockDetails('BANKNIFTY', { timeframe, rangeDays })
+    ]);
+
+    const nifty = niftyDetail
+      ? analyzeInstrument({
+          symbol: niftyDetail.symbol,
+          name: niftyDetail.name,
+          candles: niftyDetail.candles || [],
+          currentPrice: niftyDetail.currentPrice,
+          dayOpen: niftyDetail.dayOpen,
+          high: niftyDetail.high,
+          low: niftyDetail.low,
+          change: niftyDetail.change,
+          smcData: niftyDetail.smcData
+        })
+      : null;
+
+    const bankNifty = bankDetail
+      ? analyzeInstrument({
+          symbol: bankDetail.symbol,
+          name: bankDetail.name,
+          candles: bankDetail.candles || [],
+          currentPrice: bankDetail.currentPrice,
+          dayOpen: bankDetail.dayOpen,
+          high: bankDetail.high,
+          low: bankDetail.low,
+          change: bankDetail.change,
+          smcData: bankDetail.smcData
+        })
+      : null;
+
+    const xray = this.getMarketXRay();
+    const fnoUniverse = analyzeFnoUniverseFromStocks(this.stocks);
+    const report = buildMarketAnalysisReport({
+      nifty,
+      bankNifty,
+      breadth: {
+        advancing: xray.advancing,
+        declining: xray.declining,
+        neutral: xray.neutral,
+        advanceDeclineRatio: xray.advanceDeclineRatio,
+        bullishSetupsCount: xray.bullishSetupsCount,
+        bearishSetupsCount: xray.bearishSetupsCount
+      },
+      fnoUniverse
+    });
+
+    return {
+      ...report,
+      timeframe,
+      rangeDays,
+      isLive: this.isRealData === true
+    };
   }
 }
 

@@ -135,13 +135,22 @@ export default function Terminal(props) {
           </p>
         </div>
         {membership.allowMarketXRay && (
-          <button
-            type="button"
-            onClick={() => navigate('/xray')}
-            className="inline-flex items-center self-start sm:self-auto rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20 transition-colors"
-          >
-            Full Market X-Ray →
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => navigate('/analyse')}
+              className="inline-flex items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors"
+            >
+              Market Analyse →
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/xray')}
+              className="inline-flex items-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+            >
+              Full Market X-Ray →
+            </button>
+          </div>
         )}
       </div>
 

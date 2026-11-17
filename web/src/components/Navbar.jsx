@@ -15,7 +15,8 @@ import {
   Sun,
   Moon,
   GitBranch,
-  ChevronDown
+  ChevronDown,
+  Crosshair
 } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import { getMembership } from '../lib/membership';
@@ -26,7 +27,8 @@ const NAV_ITEMS = [
   { id: 'terminal', label: 'Charts', path: '/terminal', icon: LayoutDashboard, live: true, authRequired: true },
   { id: 'order-flow', label: 'Order Flow', path: '/order-flow', icon: GitBranch, live: true, authRequired: true },
   { id: 'momentum', label: '5M Momentum', path: '/momentum', icon: Zap, live: true, authRequired: true },
-  { id: 'xray', label: 'Market X-Ray', path: '/xray', icon: Activity, authRequired: true }
+  { id: 'xray', label: 'Market X-Ray', path: '/xray', icon: Activity, authRequired: true },
+  { id: 'analyse', label: 'Analyse', path: '/analyse', icon: Crosshair, live: true, authRequired: true }
 ];
 
 function formatChange(change) {
@@ -98,6 +100,7 @@ export default function Navbar({
     if (currentPath.startsWith('/order-flow')) return 'order-flow';
     if (currentPath.startsWith('/momentum') || currentPath.startsWith('/opening-momentum')) return 'momentum';
     if (currentPath.startsWith('/xray') || currentPath.startsWith('/market-xray')) return 'xray';
+    if (currentPath.startsWith('/analyse') || currentPath.startsWith('/market-analyse')) return 'analyse';
     if (currentPath.startsWith('/dashboard')) return 'dashboard';
     if (currentPath.startsWith('/pricing')) return 'pricing';
     return propActiveTab || 'home';

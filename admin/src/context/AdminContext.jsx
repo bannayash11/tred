@@ -371,7 +371,7 @@ export function AdminProvider({ children }) {
         ...(res.settings || {}),
         platformBroker: res.settings?.platformBroker || prev.platformBroker
       }));
-      showToast(res.message || 'Kotak & Upstox credentials saved!');
+      showToast(res.message || 'Broker credentials saved (Fyers default)!');
       return res;
     } catch (err) {
       showToast(err.response?.data?.message || err.userMessage || 'Could not save broker credentials.');

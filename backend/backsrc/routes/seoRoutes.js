@@ -51,6 +51,21 @@ const DEFAULT_SEO_PAGES = [
     sortOrder: 3
   },
   {
+    pageKey: 'market-analyse',
+    path: '/analyse',
+    pageName: 'Market Analyse',
+    metaTitle: 'Market Analyse — Bias, Pivots & Up/Down Scenarios | Tradrift',
+    metaDescription:
+      'Live Nifty & BankNifty analysis report with fixed pivot points, support/resistance and up/down market scenarios.',
+    metaKeywords: 'market analyse, nifty pivots, banknifty levels, market bias report',
+    ogTitle: 'Market Analyse | Tradrift',
+    ogDescription: 'Directional bias report with fixed S/R levels for Nifty and BankNifty.',
+    ogImage: '',
+    canonicalUrl: '/analyse',
+    robots: 'index, follow',
+    sortOrder: 4
+  },
+  {
     pageKey: 'pricing',
     path: '/pricing',
     pageName: 'Pricing & Plans',
@@ -281,9 +296,10 @@ router.get('/resolve', async (req, res) => {
     // Exact match first
     let match = pages.find((p) => p.path === pathname);
 
-    // Alias: /market-xray -> /xray, /about-us -> /about
-    if (!match && (pathname === '/market-xray' || pathname === '/about-us')) {
-      const aliasPath = pathname === '/market-xray' ? '/xray' : '/about';
+    // Alias: /market-xray -> /xray, /market-analyse -> /analyse, /about-us -> /about
+    if (!match && (pathname === '/market-xray' || pathname === '/market-analyse' || pathname === '/about-us')) {
+      const aliasPath =
+        pathname === '/market-xray' ? '/xray' : pathname === '/market-analyse' ? '/analyse' : '/about';
       match = pages.find((p) => p.path === aliasPath);
     }
 

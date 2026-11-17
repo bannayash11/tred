@@ -95,6 +95,8 @@ export const getSocket = () => {
 
 export const fetchScreener = () => api.get('/screener/live').then((res) => res.data);
 export const fetchMarketXRay = () => api.get('/screener/market-xray').then((res) => res.data);
+export const fetchMarketAnalyse = (params = {}) =>
+  api.get('/screener/market-analyse', { params }).then((res) => res.data);
 export const fetchOpeningMomentum = () => api.get('/screener/opening-momentum').then((res) => res.data);
 export const fetchOpeningMomentumHistoryDates = (limit = 30) =>
   api.get('/screener/opening-momentum/history/dates', { params: { limit } }).then((res) => res.data);
