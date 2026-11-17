@@ -100,7 +100,10 @@ function useViewportLayout(layoutMode) {
   const useDesktopLayout =
     layoutMode === 'desktop' || (layoutMode === 'auto' && (isWide || isLandscape));
 
-  return { isLandscape, isWide, useDesktopLayout };
+  /** Phone / narrow: desktop toggle still on, but physical width is small */
+  const isNarrow = !isWide;
+
+  return { isLandscape, isWide, isNarrow, useDesktopLayout };
 }
 
 
@@ -153,7 +156,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const [overlays, setOverlays] = useState(() => loadSavedOverlays());
   const [rangeKey, setRangeKey] = useState('5D');
   const [layoutMode, setLayoutMode] = useState(readLayoutMode);
-  const { useDesktopLayout } = useViewportLayout(layoutMode);
+  const { useDesktopLayout, isNarrow } = useViewportLayout(layoutMode);
 
   const setLayoutModePersist = (mode) => {
     setLayoutMode(mode);
@@ -394,10 +397,16 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const currentDisplayPrice = livePrice ?? stockData?.currentPrice;
   const currentDisplayChange = liveChange ?? stockData?.change;
 
+  // Desktop-on-phone: taller plot (≈ green target); allow page scroll for options below
+  const desktopPageShell =
+    isNarrow
+      ? 'min-h-[calc(100dvh-5.5rem)] overflow-x-hidden overflow-y-auto'
+      : 'h-[calc(100dvh-10.5rem)] max-h-[calc(100dvh-10.5rem)] overflow-hidden';
+
   const shellClass = asPage
     ? `relative flex w-full flex-col rounded-2xl sm:rounded-3xl border border-[#2a2e39] bg-[#131722] shadow-xl ${
         useDesktopLayout
-          ? 'h-[calc(100dvh-10.5rem)] max-h-[calc(100dvh-10.5rem)] overflow-hidden'
+          ? desktopPageShell
           : 'min-h-0 overflow-x-hidden overflow-y-auto'
       }`
     : `relative flex w-full max-w-5xl flex-col border-[#2a2e39] bg-[#131722] shadow-2xl overflow-hidden ${
@@ -699,18 +708,20 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
 
         <div
           className={`flex flex-1 min-h-0 ${
-            useDesktopLayout
+            useDesktopLayout && !isNarrow
               ? 'flex-row overflow-hidden'
               : 'flex-col overflow-y-auto overflow-x-hidden'
           }`}
         >
           <div
             className={`relative flex-1 min-w-0 min-h-0 bg-[#131722] p-1 sm:p-2 flex flex-col ${
-              useDesktopLayout
+              useDesktopLayout && !isNarrow
                 ? 'h-full'
-                : asPage
-                  ? 'h-[min(52dvh,28rem)] shrink-0'
-                  : 'h-[min(42dvh,24rem)] shrink-0'
+                : useDesktopLayout && isNarrow
+                  ? 'h-[min(72dvh,42rem)] shrink-0'
+                  : asPage
+                    ? 'h-[min(68dvh,38rem)] shrink-0'
+                    : 'h-[min(42dvh,24rem)] shrink-0'
             }`}
           >
             <ManualKotakChart
@@ -730,7 +741,7 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
 
           <div
             className={`border-[#2a2e39] bg-[#1e222d] px-3.5 py-3.5 space-y-3 ${
-              useDesktopLayout
+              useDesktopLayout && !isNarrow
                 ? 'w-56 xl:w-64 shrink-0 border-l overflow-y-auto h-full'
                 : 'w-full border-t overflow-visible'
             }`}

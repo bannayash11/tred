@@ -25,6 +25,7 @@ export default function PublicLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const isOrderFlow = location.pathname.startsWith('/order-flow');
+  const isChartPage = location.pathname.startsWith('/chart');
   const authUser = useSelector((state) => state.auth.user);
   const isAuthenticated = useSelector((state) => state.auth.isAuthenticated);
   const authToken = useSelector((state) => state.auth.token);
@@ -300,7 +301,9 @@ export default function PublicLayout() {
         className={
           isOrderFlow
             ? 'flex-1 w-full min-h-0'
-            : 'flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6'
+            : isChartPage
+              ? 'flex-1 max-w-[1800px] w-full mx-auto px-2 sm:px-6 lg:px-8 py-2 sm:py-4'
+              : 'flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6'
         }
       >
         <Outlet
