@@ -194,7 +194,8 @@ io.on('connection', async (socket) => {
           marketXRay: null,
           openingMomentum: null,
           feed: feed || { mode: 'byok', provider: null, label: 'BYOK · connect broker' },
-          error: error || 'Connect your broker to load live data.'
+          error: error || 'Connect your broker to load live data.',
+          needsReconnect: true
         });
       } else {
         socket.emit('INITIAL_STATE', session.getInitialState());
@@ -205,7 +206,8 @@ io.on('connection', async (socket) => {
         marketXRay: null,
         openingMomentum: null,
         feed: { mode: 'byok', provider: null, label: 'BYOK' },
-        error: err.message
+        error: err.message,
+        needsReconnect: true
       });
     }
   } else {
@@ -215,8 +217,16 @@ io.on('connection', async (socket) => {
       openingMomentum: marketDataService.getOpeningMomentumData(),
       feed: {
         mode: 'server',
-        provider: process.env.FYERS_ACCESS_TOKEN ? 'fyers' : 'kotak',
-        label: process.env.FYERS_ACCESS_TOKEN ? 'Platform · Fyers' : 'Platform · Kotak'
+        provider: process.env.FYERS_ACCESS_TOKEN
+          ? 'fyers'
+          : process.env.UPSTOX_ACCESS_TOKEN
+            ? 'upstox'
+            : 'kotak',
+        label: process.env.FYERS_ACCESS_TOKEN
+          ? 'Platform · Fyers'
+          : process.env.UPSTOX_ACCESS_TOKEN
+            ? 'Platform · Upstox'
+            : 'Platform · Kotak'
       }
     });
   }

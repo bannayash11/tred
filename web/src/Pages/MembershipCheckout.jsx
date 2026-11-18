@@ -91,6 +91,10 @@ export default function MembershipCheckout() {
 
   const planId = planIdParam || authUser?.subscription?.planId || '';
   const mustConnectBroker = forceConnectBroker || needsByokBrokerConnect(authUser);
+  const isByokReconnect =
+    String(authUser?.byok?.status || '').toLowerCase() === 'error' ||
+    !!authUser?.byok?.lastError ||
+    !!authUser?.byok?.needsReconnect;
 
   const [plans, setLocalPlans] = useState(plansFromStore);
   const [loading, setLoading] = useState(!plansFromStore.length);
@@ -523,7 +527,7 @@ export default function MembershipCheckout() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
             <ShieldCheck className="h-3.5 w-3.5" />
-            Paid · Connect broker API
+            {isByokReconnect ? 'Token expired · Update broker API' : 'Paid · Connect broker API'}
           </div>
           <div className="flex items-center gap-2 sm:gap-3 bg-white/90 dark:bg-slate-900/60 px-4 py-2 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm">
             <StepDot step={1} label="Plan" done />
@@ -538,14 +542,41 @@ export default function MembershipCheckout() {
 
         <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-50/90 via-white to-teal-50/50 dark:from-emerald-950/40 dark:via-[#0e1628] dark:to-[#0a1122] p-4 sm:p-5">
           <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
-            Connect your demat / broker API
+            {isByokReconnect
+              ? 'Broker token expired — enter new details'
+              : 'Connect your demat / broker API'}
           </h2>
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-            Plan{' '}
-            <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-              {plan?.name || authUser?.subscription?.plan || 'Your API'}
-            </span>{' '}
-            is unlocked. Broker API keys are required — Charts / Order Flow stay locked until you connect.
+            {isByokReconnect ? (
+              <>
+                Your broker access token has expired
+                {authUser?.byok?.provider ? (
+                  <>
+                    {' '}
+                    (
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                      {authUser.byok.provider}
+                    </span>
+                    )
+                  </>
+                ) : null}
+                . Paste a fresh token / credentials below to unlock Charts and Order Flow again.
+                {authUser?.byok?.lastError ? (
+                  <span className="block mt-1 text-rose-600 dark:text-rose-300">
+                    {authUser.byok.lastError}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <>
+                Plan{' '}
+                <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  {plan?.name || authUser?.subscription?.plan || 'Your API'}
+                </span>{' '}
+                is unlocked. Broker API keys are required — Charts / Order Flow stay locked until you
+                connect.
+              </>
+            )}
           </p>
         </div>
 

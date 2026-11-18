@@ -339,7 +339,7 @@ export default function BrokerApi() {
             <div>
               <h3 className="text-sm font-semibold text-white">Upstox</h3>
               <p className="mt-1 text-xs text-admin-muted">
-                Chart / Order Flow fallback (`ORDER_FLOW_PROVIDER=auto`).
+                After Fyers · before Kotak (`ORDER_FLOW_PROVIDER=auto`).
               </p>
             </div>
             <span

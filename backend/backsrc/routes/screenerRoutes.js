@@ -16,7 +16,8 @@ function sendByokError(res, err) {
   return res.status(status).json({
     success: false,
     message: err.message,
-    feed: err.feed || null
+    feed: err.feed || null,
+    needsReconnect: !!err.needsReconnect
   });
 }
 

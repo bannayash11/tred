@@ -419,7 +419,7 @@ export function getByokPublicStatus(user) {
     return { enabled: false, status: 'none', provider: null };
   }
   return {
-    enabled: status === 'connected' || status === 'pending',
+    enabled: status === 'connected' || status === 'pending' || status === 'error',
     status,
     provider: byok.provider || null,
     connectedAt: byok.connectedAt || null,
@@ -427,8 +427,61 @@ export function getByokPublicStatus(user) {
     uccMasked: byok.uccMasked || null,
     mobileMasked: byok.mobileMasked || null,
     consumerKeyMasked: byok.consumerKeyMasked || null,
-    hasSession: !!byok.sessionCipher
+    hasSession: !!byok.sessionCipher,
+    lastError: byok.lastError || null,
+    needsReconnect: status === 'error' || status === 'pending'
   };
+}
+
+function sessionLooksExpired(session) {
+  if (!session) return true;
+  if (session.expiresAt) {
+    const exp = Date.parse(session.expiresAt);
+    if (Number.isFinite(exp) && exp < Date.now() - 60_000) return true;
+  }
+  const tok = session.accessToken || session.token || '';
+  if (tok && String(tok).split('.').length === 3) {
+    try {
+      const payload = JSON.parse(Buffer.from(String(tok).split('.')[1], 'base64url').toString());
+      if (payload?.exp && payload.exp * 1000 < Date.now() - 60_000) return true;
+    } catch {
+      /* ignore bad jwt */
+    }
+  }
+  return false;
+}
+
+/**
+ * Persist reconnect-required state so ProtectedRoute sends the user to
+ * /checkout?connectBroker=1 to enter fresh broker details.
+ */
+export async function markByokNeedsReconnect(user, message) {
+  const id = user?._id || user?.id;
+  if (!id) return;
+  const msg = String(message || 'Broker session expired. Reconnect your broker.').slice(0, 500);
+  try {
+    const { User } = await import('../models/User.js');
+    await User.findByIdAndUpdate(id, {
+      $set: {
+        'byok.status': 'error',
+        'byok.lastError': msg,
+        'byok.sessionCipher': null
+      }
+    });
+    if (user?.byok) {
+      user.byok.status = 'error';
+      user.byok.lastError = msg;
+      user.byok.sessionCipher = null;
+    }
+    try {
+      const { byokMarketRuntime } = await import('./byokMarketRuntime.js');
+      byokMarketRuntime.dropSession?.(String(id));
+    } catch {
+      /* optional */
+    }
+  } catch (err) {
+    console.warn('[BYOK] mark reconnect failed:', err.message);
+  }
 }
 
 export function readByokSecrets(user) {
@@ -510,23 +563,33 @@ export async function resolveUserMarketFeed(user) {
     normalizeByokProvider(full?.byok?.provider || user?.byok?.provider) || null;
 
   if (status !== 'connected' || !provider) {
+    const needsReconnect = status === 'error' || status === 'pending';
     return {
       mode: 'byok',
       provider,
       session: null,
       secrets: null,
       connected: false,
-      error: 'Connect your broker to load live market data on BYOK.',
-      feed: { mode: 'byok', provider, label: 'BYOK · connect broker' }
+      needsReconnect,
+      error:
+        status === 'error'
+          ? full?.byok?.lastError ||
+            user?.byok?.lastError ||
+            'Broker session expired. Enter new broker details to continue.'
+          : 'Connect your broker to load live market data on BYOK.',
+      feed: {
+        mode: 'byok',
+        provider,
+        label: needsReconnect ? `BYOK · ${provider || 'broker'} (reconnect)` : 'BYOK · connect broker'
+      }
     };
   }
 
   let session = readByokSession(full);
   let secrets = readByokSecrets(full);
 
-  // Refresh if session looks expired (Upstox/Groww daily tokens)
-  const exp = session?.expiresAt ? Date.parse(session.expiresAt) : NaN;
-  if (Number.isFinite(exp) && exp < Date.now() - 60_000) {
+  // Refresh if session looks expired (daily broker tokens / JWT exp)
+  if (sessionLooksExpired(session)) {
     try {
       const bundle = await refreshByokSession(full);
       if (bundle && full?.save) {
@@ -536,26 +599,32 @@ export async function resolveUserMarketFeed(user) {
       session = decryptObject(bundle?.sessionCipher) || session;
       secrets = decryptObject(bundle?.secretsCipher) || secrets;
     } catch (err) {
+      const error = err.message || 'Broker session expired. Reconnect your broker.';
+      await markByokNeedsReconnect(full || user, error);
       return {
         mode: 'byok',
         provider,
         session: null,
         secrets: null,
         connected: false,
-        error: err.message || 'Broker session expired. Reconnect your broker.',
+        needsReconnect: true,
+        error,
         feed: { mode: 'byok', provider, label: `BYOK · ${provider} (reconnect)` }
       };
     }
   }
 
   if (!session) {
+    const error = 'Broker session missing. Reconnect your broker.';
+    await markByokNeedsReconnect(full || user, error);
     return {
       mode: 'byok',
       provider,
       session: null,
       secrets,
       connected: false,
-      error: 'Broker session missing. Reconnect your broker.',
+      needsReconnect: true,
+      error,
       feed: { mode: 'byok', provider, label: `BYOK · ${provider} (reconnect)` }
     };
   }

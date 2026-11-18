@@ -186,7 +186,7 @@ export async function loadPlatformBrokerFromDb() {
       upstox: { ...EMPTY_UPSTOX, ...(plain.upstox || {}) },
       updatedAt: doc.updatedAt || null
     };
-    // Env can fill gaps if admin never saved Fyers yet
+    // Env can fill gaps if admin never saved broker creds yet
     if (!runtime.fyers.appId && process.env.FYERS_APP_ID) {
       runtime.fyers.appId = process.env.FYERS_APP_ID;
     }
@@ -201,6 +201,9 @@ export async function loadPlatformBrokerFromDb() {
     }
     if (!runtime.fyers.pin && process.env.FYERS_PIN) {
       runtime.fyers.pin = process.env.FYERS_PIN;
+    }
+    if (!runtime.upstox.accessToken && process.env.UPSTOX_ACCESS_TOKEN) {
+      runtime.upstox.accessToken = process.env.UPSTOX_ACCESS_TOKEN;
     }
     applyPlatformBrokerToEnv();
     console.log(

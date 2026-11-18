@@ -157,10 +157,11 @@ export class MarketDataService {
     this.updateInterval = null;
     /** symbol|tf|range → Promise — coalesce concurrent chart fetches */
     this._historyInflight = new Map();
-    /** Platform Upstox adapter — chart fallback when Kotak has no candles */
+    /** Platform Upstox adapter — live + chart fallback after Fyers */
     this._upstoxAdapter = null;
     this._upstoxToken = '';
     this._upstoxInit = null;
+    this._upstoxPollInterval = null;
   }
 
   async _ensureUpstoxAdapter() {
@@ -237,10 +238,13 @@ export class MarketDataService {
     // Auto-freeze runs after live quotes calibrate / at 09:20 IST.
     await openingMomentumService.initialize(this.io);
 
-    // Primary: Fyers · Fallback: Kotak Neo
+    // Priority: Fyers → Upstox → Kotak (last)
     const fyersReady = await this.initFyersLiveFeed();
     if (!fyersReady) {
-      this.initKotakLiveFeed();
+      const upstoxReady = await this.initUpstoxLiveFeed();
+      if (!upstoxReady) {
+        this.initKotakLiveFeed();
+      }
     }
   }
 
@@ -252,7 +256,7 @@ export class MarketDataService {
     const appId = process.env.FYERS_APP_ID || fyersService.appId;
     const token = process.env.FYERS_ACCESS_TOKEN || fyersService.accessToken;
     if (!appId || !token) {
-      console.warn('[MarketDataService] No Fyers credentials — trying Kotak fallback.');
+      console.warn('[MarketDataService] No Fyers credentials — trying Upstox fallback.');
       return false;
     }
 
@@ -266,12 +270,122 @@ export class MarketDataService {
 
     const ok = await fyersService.ensureSession();
     if (!ok || !fyersService.configured) {
-      console.warn('[MarketDataService] Fyers session not ready — trying Kotak fallback.');
+      console.warn('[MarketDataService] Fyers session not ready — trying Upstox fallback.');
+      return false;
+    }
+
+    // Probe real quotes — expired/invalid token must not stay primary
+    fyersService.setUniverse(['RELIANCE', 'SBIN', 'TCS']);
+    try {
+      const probe = await fyersService.fetchLiveQuotes(['RELIANCE', 'SBIN', 'TCS']);
+      if (!probe?.length) {
+        fyersService.markAuthUnhealthy('probe returned no quotes');
+        console.warn('[MarketDataService] Fyers token invalid/empty — trying Upstox fallback.');
+        return false;
+      }
+    } catch (err) {
+      fyersService.markAuthUnhealthy(err.message);
+      console.warn('[MarketDataService] Fyers probe failed — trying Upstox fallback:', err.message);
       return false;
     }
 
     await this.activateFyersLiveFeed();
     return true;
+  }
+
+  /** When Fyers dies mid-session, move live feed to Upstox (then Kotak). */
+  async failoverLiveFeedFromFyers(reason = '') {
+    if (this.activeFeedProvider && this.activeFeedProvider !== 'fyers') return;
+    console.warn(
+      `[MarketDataService] Fyers dead → failover (${reason || 'auth'}). Trying Upstox…`
+    );
+    try {
+      fyersService.stopLiveFeed();
+    } catch {
+      /* ignore */
+    }
+    this.activeFeedProvider = null;
+    const upstoxReady = await this.initUpstoxLiveFeed();
+    if (!upstoxReady) {
+      console.warn('[MarketDataService] Upstox failover failed — trying Kotak.');
+      await this.initKotakLiveFeed();
+    }
+  }
+
+  /**
+   * Upstox live quotes (after Fyers fails / missing).
+   * @returns {Promise<boolean>}
+   */
+  async initUpstoxLiveFeed() {
+    try {
+      const adapter = await this._ensureUpstoxAdapter();
+      if (!adapter) {
+        console.warn('[MarketDataService] No Upstox token — trying Kotak fallback.');
+        return false;
+      }
+      // Probe quotes — throw = bad/expired token; empty array OK (off-hours)
+      await adapter.getQuotes(['RELIANCE', 'SBIN']);
+      await this.activateUpstoxLiveFeed(adapter);
+      return true;
+    } catch (err) {
+      console.warn('[MarketDataService] Upstox live feed unavailable:', err.message);
+      return false;
+    }
+  }
+
+  async activateUpstoxLiveFeed(adapter) {
+    if (this.activeFeedProvider === 'fyers' && fyersService.isUsable) {
+      console.log('[MarketDataService] Upstox online but Fyers remains primary feed.');
+      return;
+    }
+    try {
+      fyersService.stopLiveFeed();
+    } catch {
+      /* ignore */
+    }
+    console.log('🔥 [MarketDataService] UPSTOX LIVE NSE DATA CONNECTED (fallback)!');
+    this.isRealData = true;
+    this.activeFeedProvider = 'upstox';
+
+    if (this._upstoxPollInterval) {
+      clearInterval(this._upstoxPollInterval);
+      this._upstoxPollInterval = null;
+    }
+
+    try {
+      const ticks = await adapter.getQuotes(Array.from(this.stocks.keys()));
+      if (ticks?.length) {
+        for (const t of ticks) {
+          const stock = this.stocks.get(t.symbol);
+          if (!stock) continue;
+          stock.currentPrice = t.currentPrice;
+          stock.high = t.high || t.currentPrice;
+          stock.low = t.low || t.currentPrice;
+          stock.dayOpen = t.open || t.currentPrice;
+          stock.change = t.change;
+          stock.volume = t.volume || 0;
+        }
+        console.log(`[MarketDataService] Calibrated Upstox quotes for ${ticks.length} symbols.`);
+      }
+    } catch (calibErr) {
+      console.error('[MarketDataService] Upstox calibration error:', calibErr.message);
+    }
+
+    openingMomentumService.startScheduler(() => this.stocks);
+
+    const pollMs = Math.max(2500, Number(process.env.UPSTOX_QUOTE_POLL_MS) || 4000);
+    const poll = async () => {
+      try {
+        const ticks = await adapter.getQuotes(Array.from(this.stocks.keys()));
+        if (ticks?.length) this.handleRealTicks(ticks);
+      } catch (err) {
+        console.warn('[MarketDataService] Upstox poll error:', err.message);
+      }
+    };
+    void poll();
+    this._upstoxPollInterval = setInterval(poll, pollMs);
+    console.log(`[MarketDataService] Upstox quote poll started (${pollMs}ms)`);
+    void this.warmRealCandles();
   }
 
   async activateFyersLiveFeed() {
@@ -280,6 +394,9 @@ export class MarketDataService {
     this.activeFeedProvider = 'fyers';
 
     fyersService.setUniverse(Array.from(this.stocks.keys()));
+    fyersService.onAuthDead((reason) => {
+      void this.failoverLiveFeedFromFyers(reason);
+    });
 
     try {
       const ticks = await fyersService.fetchLiveQuotes();
@@ -306,7 +423,7 @@ export class MarketDataService {
   }
 
   /**
-   * Connect to Kotak Neo live market feed (fallback when Fyers unavailable)
+   * Connect to Kotak Neo live market feed (last resort after Fyers + Upstox)
    */
   async initKotakLiveFeed() {
     const hasCredentials =
@@ -342,12 +459,16 @@ export class MarketDataService {
   }
 
   async activateKotakLiveFeed() {
-    // Don't steal the feed if Fyers is already primary
-    if (this.activeFeedProvider === 'fyers' && fyersService.configured) {
+    // Don't steal the feed if Fyers or Upstox is already primary
+    if (this.activeFeedProvider === 'fyers' && fyersService.isUsable) {
       console.log('[MarketDataService] Kotak online but Fyers remains primary feed.');
       return;
     }
-    console.log('🔥 [MarketDataService] REAL LIVE NSE DATA CONNECTED (Kotak)!');
+    if (this.activeFeedProvider === 'upstox') {
+      console.log('[MarketDataService] Kotak online but Upstox remains primary feed.');
+      return;
+    }
+    console.log('🔥 [MarketDataService] REAL LIVE NSE DATA CONNECTED (Kotak · last resort)!');
     this.isRealData = true;
     this.activeFeedProvider = 'kotak';
 
@@ -414,9 +535,10 @@ export class MarketDataService {
         if (!orderFlowService._prefetching) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
-      const preferFyers = this.activeFeedProvider === 'fyers' || fyersService.configured;
       console.log(
-        `[MarketDataService] Warming real 5m candles from ${preferFyers ? 'Fyers' : 'Kotak'} (throttled)…`
+        `[MarketDataService] Warming real 5m candles · ${
+          fyersService.isUsable ? 'Fyers → ' : ''
+        }Upstox → Kotak (throttled)…`
       );
       let consecutive429 = 0;
       const symbols = Array.from(this.stocks.values()).filter((s) => s.sector !== 'Indices');
@@ -436,16 +558,31 @@ export class MarketDataService {
         }
         try {
           let realCandles = [];
-          if (preferFyers && fyersService.configured) {
+          let warmProvider = null;
+          // 1) Fyers (skip entirely once auth is dead)
+          if (fyersService.isUsable) {
             try {
               realCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
                 timeframe: '5m',
                 rangeDays: 2
               });
+              if (realCandles?.length) warmProvider = 'fyers';
             } catch (fyErr) {
+              if (fyersService.isAuthErrorMessage(fyErr.message)) {
+                fyersService.markAuthUnhealthy(fyErr.message);
+              }
               console.warn(`[MarketDataService] Fyers warm ${stock.symbol}:`, fyErr.message);
             }
           }
+          // 2) Upstox
+          if (!realCandles?.length) {
+            realCandles = await this._fetchUpstoxCandles(stock.symbol, {
+              timeframe: '5m',
+              rangeDays: 2
+            });
+            if (realCandles?.length) warmProvider = 'upstox';
+          }
+          // 3) Kotak last
           if (!realCandles?.length) {
             const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
             if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
@@ -453,13 +590,8 @@ export class MarketDataService {
                 timeframe: '5m',
                 rangeDays: 2
               });
+              if (realCandles?.length) warmProvider = 'kotak';
             }
-          }
-          if (!realCandles?.length) {
-            realCandles = await this._fetchUpstoxCandles(stock.symbol, {
-              timeframe: '5m',
-              rangeDays: 2
-            });
           }
           consecutive429 = 0;
           if (realCandles?.length) {
@@ -476,7 +608,7 @@ export class MarketDataService {
                 candles,
                 smcData: stock.smcData,
                 fetchedAt: Date.now(),
-                provider: preferFyers ? 'fyers' : 'kotak'
+                provider: warmProvider || 'unknown'
               };
               warmed += 1;
               // Push setups to Terminal as soon as a few names have SMC.
@@ -967,8 +1099,8 @@ export class MarketDataService {
           let filtered = [];
           let provider = 'fyers';
 
-          // 1) Fyers (platform default)
-          if (fyersService.configured || process.env.FYERS_ACCESS_TOKEN) {
+          // 1) Fyers (platform default) — skip when token is dead
+          if (fyersService.isUsable || (!fyersService.configured && process.env.FYERS_ACCESS_TOKEN)) {
             try {
               if (!fyersService.configured) {
                 fyersService.applyCredentials({
@@ -979,13 +1111,18 @@ export class MarketDataService {
                   pin: process.env.FYERS_PIN || ''
                 });
               }
-              const fyCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
-                timeframe,
-                rangeDays
-              });
-              filtered = filterNseSessionCandles(fyCandles || [], timeframe);
-              if (filtered.length) provider = 'fyers';
+              if (fyersService.isUsable) {
+                const fyCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
+                  timeframe,
+                  rangeDays
+                });
+                filtered = filterNseSessionCandles(fyCandles || [], timeframe);
+                if (filtered.length) provider = 'fyers';
+              }
             } catch (e) {
+              if (fyersService.isAuthErrorMessage?.(e.message)) {
+                fyersService.markAuthUnhealthy(e.message);
+              }
               console.warn(`[MarketDataService] Fyers chart ${stock.symbol}:`, e.message);
             }
           }

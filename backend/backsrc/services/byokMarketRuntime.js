@@ -613,6 +613,15 @@ class ByokMarketRuntime {
     }
   }
 
+  dropSession(userId) {
+    const id = String(userId || '');
+    if (!id) return;
+    const session = this.sessions.get(id);
+    if (!session) return;
+    session.stopPolling();
+    this.sessions.delete(id);
+  }
+
   async getSessionForUser(user) {
     const resolved = await resolveUserMarketFeed(user);
     if (resolved.mode !== 'byok') {
@@ -623,7 +632,8 @@ class ByokMarketRuntime {
         mode: 'byok',
         feed: resolved.feed,
         session: null,
-        error: resolved.error || 'Connect your broker to load market data.'
+        error: resolved.error || 'Connect your broker to load market data.',
+        needsReconnect: !!resolved.needsReconnect
       };
     }
 
@@ -660,6 +670,7 @@ class ByokMarketRuntime {
       const err = new Error(error || 'BYOK broker not connected');
       err.statusCode = 403;
       err.feed = feed;
+      err.needsReconnect = true;
       throw err;
     }
     return { data: session.getScreenerData(), feed };
@@ -674,6 +685,7 @@ class ByokMarketRuntime {
       const err = new Error(error || 'BYOK broker not connected');
       err.statusCode = 403;
       err.feed = feed;
+      err.needsReconnect = true;
       throw err;
     }
     return { data: session.getMarketXRay(), feed };
@@ -688,6 +700,7 @@ class ByokMarketRuntime {
       const err = new Error(error || 'BYOK broker not connected');
       err.statusCode = 403;
       err.feed = feed;
+      err.needsReconnect = true;
       throw err;
     }
     return { data: session.getOpeningMomentumData(), feed };
@@ -703,6 +716,7 @@ class ByokMarketRuntime {
       const err = new Error(error || 'BYOK broker not connected');
       err.statusCode = 403;
       err.feed = feed;
+      err.needsReconnect = true;
       throw err;
     }
     return session.getStockDetails(symbol, options);
@@ -718,6 +732,7 @@ class ByokMarketRuntime {
       const err = new Error(error || 'BYOK broker not connected');
       err.statusCode = 403;
       err.feed = feed;
+      err.needsReconnect = true;
       throw err;
     }
     const data = await session.getMarketAnalysis(options);

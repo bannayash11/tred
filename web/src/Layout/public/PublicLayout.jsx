@@ -19,6 +19,7 @@ import { updateUser, logout, loginSuccess } from '../../store/slices/authSlice';
 import { setScreenerData, setMarketXRay } from '../../store/slices/screenerSlice';
 import { setPlans } from '../../store/slices/contentSlice';
 import { chartLoginPath, chartPath } from '../../lib/chartRoutes';
+import { byokConnectCheckoutPath, needsByokBrokerConnect } from '../../lib/membership';
 
 export default function PublicLayout() {
   const dispatch = useDispatch();
@@ -86,12 +87,19 @@ export default function PublicLayout() {
       return undefined;
     }
 
+    const redirectToByokConnect = (nextUser) => {
+      if (!needsByokBrokerConnect(nextUser)) return;
+      if (location.pathname.startsWith('/checkout')) return;
+      navigate(byokConnectCheckoutPath(nextUser), { replace: true });
+    };
+
     getMe()
       .then((res) => {
         if (res.success) {
           setUser(res.user);
           dispatch(updateUser(res.user));
           dispatch(loginSuccess({ user: res.user, token: authToken }));
+          redirectToByokConnect(res.user);
         }
       })
       .catch((err) => {
@@ -123,6 +131,16 @@ export default function PublicLayout() {
         setApiBanner(
           err.response?.data?.message || err.userMessage || 'Cannot load live screener right now.'
         );
+        if (err.response?.data?.needsReconnect) {
+          getMe()
+            .then((res) => {
+              if (res.success) {
+                dispatch(updateUser(res.user));
+                redirectToByokConnect(res.user);
+              }
+            })
+            .catch(() => {});
+        }
       });
 
     fetchMarketXRay()
@@ -159,6 +177,23 @@ export default function PublicLayout() {
       if (payload.marketXRay) {
         setXrayDataState(payload.marketXRay);
         dispatch(setMarketXRay(payload.marketXRay));
+      }
+      const reconnect =
+        payload.needsReconnect ||
+        (payload.feed?.mode === 'byok' &&
+          /reconnect|expired|connect your broker/i.test(
+            `${payload.error || ''} ${payload.feed?.label || ''}`
+          ));
+      if (reconnect && authToken) {
+        getMe()
+          .then((res) => {
+            if (!res.success) return;
+            dispatch(updateUser(res.user));
+            if (needsByokBrokerConnect(res.user) && !location.pathname.startsWith('/checkout')) {
+              navigate(byokConnectCheckoutPath(res.user), { replace: true });
+            }
+          })
+          .catch(() => {});
       }
     });
 
@@ -219,7 +254,7 @@ export default function PublicLayout() {
       socket.off('MARKET_TICK');
       socket.off('MARKET_XRAY');
     };
-  }, [dispatch, authToken]);
+  }, [dispatch, authToken, navigate, location.pathname]);
 
   const goToLogin = () => navigate('/login');
 

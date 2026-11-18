@@ -107,6 +107,10 @@ class FyersService {
     this._tickCallback = null;
     this._refreshTimer = null;
     this._refreshInflight = null;
+    this._onAuthDead = null;
+    this._authHealthy = true;
+    this._refreshDisabled = false;
+    this._authFailStreak = 0;
     this.symbolList = [];
   }
 
@@ -120,7 +124,16 @@ class FyersService {
   } = {}) {
     if (appId !== undefined) this.appId = String(appId || '').trim();
     if (appSecret !== undefined) this.appSecret = String(appSecret || '').trim();
-    if (accessToken !== undefined) this.accessToken = String(accessToken || '').trim();
+    if (accessToken !== undefined) {
+      const next = String(accessToken || '').trim();
+      // Only revive auth when the token value actually changes (DB reload must not undo failover)
+      if (next !== this.accessToken) {
+        this.accessToken = next;
+        this._authHealthy = true;
+        this._authFailStreak = 0;
+        this._refreshDisabled = false;
+      }
+    }
     if (refreshToken !== undefined) this.refreshToken = String(refreshToken || '').trim();
     if (pin !== undefined) this.pin = String(pin || '').trim();
     if (redirectUri !== undefined) this.redirectUri = String(redirectUri || '').trim();
@@ -130,8 +143,43 @@ class FyersService {
     return Boolean(this.appId && this.accessToken);
   }
 
+  /** Configured AND last auth probe / API call succeeded */
+  get isUsable() {
+    return this.configured && this._authHealthy !== false;
+  }
+
   get canAutoRefresh() {
+    if (this._refreshDisabled) return false;
     return Boolean(this.appId && this.appSecret && this.refreshToken && this.pin);
+  }
+
+  onAuthDead(cb) {
+    this._onAuthDead = typeof cb === 'function' ? cb : null;
+  }
+
+  markAuthUnhealthy(reason = '') {
+    if (this._authHealthy === false) return;
+    this._authHealthy = false;
+    const msg = String(reason || 'auth failed').slice(0, 160);
+    console.warn(`[FyersService] Marked unusable — skipping Fyers until new token (${msg})`);
+    if (typeof this._onAuthDead === 'function') {
+      try {
+        this._onAuthDead(msg);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  isAuthErrorMessage(message = '') {
+    const msg = String(message || '').toLowerCase();
+    return (
+      msg.includes('authenticate') ||
+      msg.includes('valid token') ||
+      msg.includes('unauthorized') ||
+      msg.includes('token') ||
+      msg.includes('sebi')
+    );
   }
 
   authHeader() {
@@ -180,13 +228,18 @@ class FyersService {
           console.log('[FyersService] Access token refreshed via refresh_token');
           return true;
         }
-        console.warn(
-          '[FyersService] Refresh failed:',
-          res.data?.message || res.data?.code || res.statusCode
-        );
+        const failMsg = String(res.data?.message || res.data?.code || res.statusCode || '');
+        console.warn('[FyersService] Refresh failed:', failMsg);
+        // SEBI: refresh API disabled — stop hammering every candle request
+        if (/sebi|disabled|refresh token/i.test(failMsg)) {
+          this._refreshDisabled = true;
+        }
         return false;
       } catch (err) {
         console.warn('[FyersService] Refresh error:', err.message);
+        if (/sebi|disabled/i.test(String(err.message || ''))) {
+          this._refreshDisabled = true;
+        }
         return false;
       } finally {
         this._refreshInflight = null;
@@ -222,6 +275,9 @@ class FyersService {
   }
 
   async dataGet(path) {
+    if (!this.isUsable && this.configured && this._authHealthy === false) {
+      throw new Error('Fyers: auth unhealthy — use Upstox/Kotak fallback');
+    }
     await this.ensureSession();
     if (!this.configured) throw new Error('Fyers not configured (need App ID + access token)');
 
@@ -242,7 +298,8 @@ class FyersService {
       code === -16 ||
       code === -17 ||
       msg.includes('token') ||
-      msg.includes('unauthorized');
+      msg.includes('unauthorized') ||
+      msg.includes('authenticate');
 
     if (authFail && this.canAutoRefresh) {
       const ok = await this.refreshAccessToken();
@@ -257,8 +314,13 @@ class FyersService {
     }
 
     if (res.data?.s && res.data.s !== 'ok') {
-      throw new Error(`Fyers: ${res.data.message || res.data.code || 'error'}`);
+      const errMsg = res.data.message || res.data.code || 'error';
+      if (authFail || this.isAuthErrorMessage(errMsg)) {
+        this.markAuthUnhealthy(errMsg);
+      }
+      throw new Error(`Fyers: ${errMsg}`);
     }
+    this._authFailStreak = 0;
     return res.data;
   }
 
@@ -280,6 +342,9 @@ class FyersService {
         data = await this.dataGet(`/data/quotes?symbols=${qs}`);
       } catch (err) {
         console.warn('[FyersService] quotes batch failed:', err.message);
+        if (this.isAuthErrorMessage(err.message) || this._authHealthy === false) {
+          throw err;
+        }
         continue;
       }
       for (const row of data?.d || []) {
@@ -342,14 +407,26 @@ class FyersService {
     this.scheduleDailyRefresh();
 
     const poll = async () => {
-      if (this.pollPaused) return;
+      if (this.pollPaused || this._authHealthy === false) return;
       try {
         const ticks = await this.fetchLiveQuotes();
         if (ticks.length && typeof this._tickCallback === 'function') {
+          this._authFailStreak = 0;
           this._tickCallback(ticks);
+          return;
+        }
+        // Empty quotes during session often mean bad token
+        this._authFailStreak += 1;
+        if (this._authFailStreak >= 3) {
+          this.markAuthUnhealthy('live quotes empty / invalid token');
+          this.stopLiveFeed();
         }
       } catch (err) {
         console.warn('[FyersService] poll error:', err.message);
+        if (this.isAuthErrorMessage(err.message)) {
+          this.markAuthUnhealthy(err.message);
+          this.stopLiveFeed();
+        }
       }
     };
 

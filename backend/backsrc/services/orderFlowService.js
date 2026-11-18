@@ -292,7 +292,8 @@ class OrderFlowService {
       /* ignore recovery errors */
     }
 
-    // auto (default): Kotak first, Upstox fallback | kotak | upstox
+    // auto (default): Upstox first, Kotak last | upstox | kotak
+    // (Platform charts/live use Fyers → Upstox → Kotak; Order Flow has no Fyers adapter.)
     const mode = String(process.env.ORDER_FLOW_PROVIDER || 'auto').toLowerCase();
     let started = false;
     let lastErr = null;
@@ -300,29 +301,29 @@ class OrderFlowService {
     const tryKotak = mode === 'auto' || mode === 'kotak';
     const tryUpstox = mode === 'auto' || mode === 'upstox';
 
-    if (tryKotak) {
+    if (tryUpstox) {
       try {
-        await this.tryStartKotak();
+        await this.tryStartUpstox();
         started = true;
-        console.log(`[OrderFlow] Using Kotak Neo · ${this.universe.length} underlyings`);
+        console.log(`[OrderFlow] Using Upstox · ${this.universe.length} underlyings`);
       } catch (err) {
         lastErr = err;
-        console.warn(`[OrderFlow] Kotak unavailable: ${err.message}`);
-        if (mode === 'kotak') {
+        console.warn(`[OrderFlow] Upstox unavailable: ${err.message}`);
+        if (mode === 'upstox') {
           this.state.lastError = { at: Date.now(), message: err.message };
           return;
         }
       }
     }
 
-    if (!started && tryUpstox) {
+    if (!started && tryKotak) {
       try {
-        await this.tryStartUpstox();
+        await this.tryStartKotak();
         started = true;
-        console.log(`[OrderFlow] Fallback → Upstox · ${this.universe.length} underlyings`);
+        console.log(`[OrderFlow] Fallback → Kotak Neo (last) · ${this.universe.length} underlyings`);
       } catch (err) {
         lastErr = err;
-        console.warn(`[OrderFlow] Upstox unavailable: ${err.message}`);
+        console.warn(`[OrderFlow] Kotak unavailable: ${err.message}`);
       }
     }
 
@@ -331,7 +332,7 @@ class OrderFlowService {
         at: Date.now(),
         message:
           lastErr?.message ||
-          'No Order Flow provider ready. Set Kotak KOTAK_* or UPSTOX_ACCESS_TOKEN (ORDER_FLOW_PROVIDER=auto|kotak|upstox).'
+          'No Order Flow provider ready. Set UPSTOX_ACCESS_TOKEN or Kotak KOTAK_* (ORDER_FLOW_PROVIDER=auto|upstox|kotak).'
       };
       console.warn('[OrderFlow]', this.state.lastError.message);
       return;
@@ -451,19 +452,21 @@ class OrderFlowService {
     }
   }
 
-  async maybeFallbackToUpstox(reason) {
-    if (this.feed !== 'kotak') return false;
-    if (String(process.env.ORDER_FLOW_PROVIDER || 'auto').toLowerCase() === 'kotak') return false;
-    if (!process.env.UPSTOX_ACCESS_TOKEN) return false;
-    console.warn(`[OrderFlow] Switching Kotak → Upstox (${reason})`);
+  async maybeFallbackToKotak(reason) {
+    if (this.feed !== 'upstox') return false;
+    if (String(process.env.ORDER_FLOW_PROVIDER || 'auto').toLowerCase() === 'upstox') return false;
+    const hasKotak =
+      process.env.KOTAK_CONSUMER_KEY && process.env.KOTAK_UCC && process.env.KOTAK_TOTP_KEY;
+    if (!hasKotak) return false;
+    console.warn(`[OrderFlow] Switching Upstox → Kotak last resort (${reason})`);
     try {
-      await this.tryStartUpstox();
+      await this.tryStartKotak();
       this.ladderCache = { session: '', bySymbol: new Map() };
       this.futuresCache.clear();
       this._failStreak = 0;
       return true;
     } catch (err) {
-      console.warn('[OrderFlow] Upstox fallback failed:', err.message);
+      console.warn('[OrderFlow] Kotak fallback failed:', err.message);
       return false;
     }
   }
@@ -961,12 +964,14 @@ class OrderFlowService {
         });
       }
 
-      // If Kotak mostly fails, switch to Upstox when available
+      // If Upstox mostly fails, switch to Kotak (last resort) when available
       const failRatio = failed.length / Math.max(1, series.length + failed.length);
-      if (this.feed === 'kotak' && failRatio >= 0.6 && process.env.UPSTOX_ACCESS_TOKEN) {
+      if (this.feed === 'upstox' && failRatio >= 0.6) {
         this._failStreak += 1;
         if (this._failStreak >= 2) {
-          const switched = await this.maybeFallbackToUpstox(`high fail ratio ${(failRatio * 100).toFixed(0)}%`);
+          const switched = await this.maybeFallbackToKotak(
+            `high fail ratio ${(failRatio * 100).toFixed(0)}%`
+          );
           if (switched) {
             this.state.building = false;
             await this.build();
@@ -982,7 +987,7 @@ class OrderFlowService {
       };
       this._failStreak += 1;
       if (this._failStreak >= 2) {
-        const switched = await this.maybeFallbackToUpstox(error.message || 'build failed');
+        const switched = await this.maybeFallbackToKotak(error.message || 'build failed');
         if (switched) {
           this.state.building = false;
           await this.build();

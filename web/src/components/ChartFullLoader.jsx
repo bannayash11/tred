@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 /**
  * Full-viewport chart loader (separate from Terminal / page spinners).
- * Shown until candles resolve (Kotak → Upstox fallback on server).
+ * Shown until candles resolve (Fyers → Upstox → Kotak on server).
  */
 export default function ChartFullLoader({ symbol, timeframe = '5m', rangeKey = '5D' }) {
   if (typeof document === 'undefined') return null;
@@ -43,7 +43,7 @@ export default function ChartFullLoader({ symbol, timeframe = '5m', rangeKey = '
           </div>
 
           <p className="mt-4 text-[10px] font-medium text-slate-500">
-            Kotak first · Upstox if needed
+            Fyers → Upstox → Kotak
           </p>
         </div>
       </div>
