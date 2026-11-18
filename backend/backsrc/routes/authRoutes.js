@@ -28,6 +28,7 @@ import { Payment } from '../models/Payment.js';
 import { activateMembershipForUser } from '../services/membershipActivation.js';
 import {
   isSmtpReady,
+  loadSmtpSettingsFromDb,
   sendOtpEmail,
   shouldExposeOtpInApi
 } from '../services/platformEmailService.js';
@@ -123,6 +124,12 @@ function otpCooldownResponse(retryAfterSec) {
 }
 
 async function issueAndSendOtp({ email, purpose, recipientName = '' }) {
+  // Pick up latest SMTP from DB (admin / .env sync) before every OTP send.
+  try {
+    await loadSmtpSettingsFromDb();
+  } catch {
+    // ignore — sendOtpEmail / isSmtpReady will still validate
+  }
   if (!isSmtpReady()) {
     throw new Error('Email OTP is unavailable. Admin must configure SMTP first.');
   }

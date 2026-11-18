@@ -423,18 +423,45 @@ function createTransport() {
 }
 
 export async function sendMail({ to, subject, html, text }) {
+  // Always refresh from DB so live/admin SMTP edits apply without a full process restart.
+  try {
+    await loadSmtpSettingsFromDb();
+  } catch (err) {
+    console.warn('[SMTP] refresh before send failed:', err.message || err);
+  }
+
   if (!isSmtpReady()) {
     throw new Error('SMTP is not configured or disabled. Set it up in Admin → Email Templates.');
   }
   const s = getSmtpSettings();
   const transporter = createTransport();
-  return transporter.sendMail({
-    from: `"${s.fromName}" <${s.fromEmail}>`,
-    to,
-    subject,
-    html,
-    text: text || undefined
-  });
+  try {
+    return await transporter.sendMail({
+      from: `"${s.fromName}" <${s.fromEmail}>`,
+      to,
+      subject,
+      html,
+      text: text || undefined
+    });
+  } catch (err) {
+    const msg = String(err?.message || err || '');
+    // Stale in-memory creds / wrong env: one more forced reload then retry once.
+    if (/535|Invalid login|EAUTH|credentials/i.test(msg)) {
+      console.warn('[SMTP] auth failed, reloading settings and retrying once…');
+      await loadSmtpSettingsFromDb();
+      if (!isSmtpReady()) throw err;
+      const retryTransport = createTransport();
+      const latest = getSmtpSettings();
+      return retryTransport.sendMail({
+        from: `"${latest.fromName}" <${latest.fromEmail}>`,
+        to,
+        subject,
+        html,
+        text: text || undefined
+      });
+    }
+    throw err;
+  }
 }
 
 export async function sendTemplatedEmail({
