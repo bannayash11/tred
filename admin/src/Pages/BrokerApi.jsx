@@ -36,6 +36,7 @@ export default function BrokerApi() {
     ...(pb.kotak || {})
   }));
   const [upstoxToken, setUpstoxToken] = useState(pb.upstox?.accessToken || '');
+  const [defaultProvider, setDefaultProvider] = useState(pb.defaultProvider || 'kotak');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
 
@@ -60,6 +61,7 @@ export default function BrokerApi() {
       totpKey: next.kotak?.totpKey || prev.totpKey || ''
     }));
     if (next.upstox?.accessToken) setUpstoxToken(next.upstox.accessToken);
+    if (next.defaultProvider) setDefaultProvider(next.defaultProvider);
   }, [systemSettings?.platformBroker]);
 
   const setFyersField = (key, value) => {
@@ -84,11 +86,19 @@ export default function BrokerApi() {
     const kotakConfigured = !!pb.kotak?.configured;
     const upstoxConfigured = !!pb.upstox?.configured;
 
-    // Prefer Fyers — require App ID + access token if nothing configured yet
-    if (!fyersConfigured && !kotakConfigured) {
-      if (!String(fyers.appId || '').trim()) nextErr.fyersAppId = 'Fyers App ID required (or configure Kotak).';
-      if (!String(fyers.accessToken || '').trim() || isMaskedToken(fyers.accessToken)) {
-        nextErr.fyersAccessToken = 'Fyers access token required.';
+    // At least one platform broker must be configured
+    if (!fyersConfigured && !kotakConfigured && !upstoxConfigured) {
+      if (defaultProvider === 'fyers') {
+        if (!String(fyers.appId || '').trim()) nextErr.fyersAppId = 'Fyers App ID required.';
+        if (!String(fyers.accessToken || '').trim() || isMaskedToken(fyers.accessToken)) {
+          nextErr.fyersAccessToken = 'Fyers access token required.';
+        }
+      } else if (defaultProvider === 'upstox') {
+        if (!String(upstoxToken || '').trim() || isMaskedToken(upstoxToken)) {
+          nextErr.upstoxToken = 'Upstox access token required.';
+        }
+      } else if (!String(kotak.consumerKey || '').trim() || isMaskedToken(kotak.consumerKey)) {
+        nextErr.form = 'Configure Kotak (or another broker) before saving.';
       }
     }
 
@@ -106,6 +116,7 @@ export default function BrokerApi() {
     setErrors({});
     try {
       await saveBroker({
+        defaultProvider,
         fyers: {
           appId: fyers.appId,
           appSecret: fyers.appSecret,
@@ -152,17 +163,66 @@ export default function BrokerApi() {
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="Broker API"
-        description="Platform feed — priority Fyers → Upstox → Kotak. Used for Terminal, charts, and server plans."
+        description="Platform feed for Terminal, charts, and server plans. Pick a default — others are automatic fallback."
         icon={KeyRound}
       />
 
       <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+        <Panel className="space-y-4 p-5 sm:p-6">
+          <div className="border-b border-admin-border pb-4">
+            <h3 className="text-sm font-semibold text-white">Default live feed</h3>
+            <p className="mt-1 text-xs text-admin-muted">
+              Primary broker for quotes + candles. If it fails, system tries the other two automatically.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {[
+              { id: 'kotak', label: 'Kotak Neo', hint: 'Recommended · TOTP auto login' },
+              { id: 'fyers', label: 'Fyers', hint: 'Daily access token' },
+              { id: 'upstox', label: 'Upstox', hint: 'Daily access token' }
+            ].map((opt) => {
+              const selected = defaultProvider === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setDefaultProvider(opt.id);
+                    setErrors({});
+                  }}
+                  className={`rounded-xl border px-3 py-3 text-left transition ${
+                    selected
+                      ? 'border-emerald-600/60 bg-emerald-950/40 ring-1 ring-emerald-500/40'
+                      : 'border-admin-border bg-admin-panel/40 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="text-sm font-semibold text-white">{opt.label}</div>
+                  <div className="mt-1 text-[11px] text-admin-muted">{opt.hint}</div>
+                  {selected && (
+                    <div className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                      Default
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-admin-muted">
+            Priority now:{' '}
+            <span className="font-mono text-slate-300">
+              {defaultProvider}
+              {' → '}
+              {['kotak', 'fyers', 'upstox'].filter((p) => p !== defaultProvider).join(' → ')}
+            </span>
+          </p>
+        </Panel>
+
         <Panel className="space-y-5 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-admin-border pb-4">
             <div>
               <h3 className="text-sm font-semibold text-white">Fyers API v3</h3>
               <p className="mt-1 text-xs text-admin-muted">
-                Default live feed + charts. Add PIN + refresh token for auto daily renew (~15 days).
+                Live feed + charts when selected as default or used as fallback. Daily token required.
               </p>
             </div>
             <span
@@ -172,7 +232,11 @@ export default function BrokerApi() {
                   : 'border-amber-800/50 bg-amber-950/40 text-amber-200'
               }`}
             >
-              {pb.primary === 'fyers' ? 'Primary · Configured' : pb.fyers?.configured ? 'Configured' : 'Not set'}
+              {defaultProvider === 'fyers'
+                ? 'Default'
+                : pb.fyers?.configured
+                  ? 'Fallback · Configured'
+                  : 'Not set'}
             </span>
           </div>
 
@@ -263,7 +327,7 @@ export default function BrokerApi() {
             <div>
               <h3 className="text-sm font-semibold text-white">Kotak Neo</h3>
               <p className="mt-1 text-xs text-admin-muted">
-                Fallback feed + Order Flow option chain when Fyers is down.
+                Live feed + Order Flow. TOTP login — best default when Fyers quota is tight.
               </p>
             </div>
             <span
@@ -273,7 +337,11 @@ export default function BrokerApi() {
                   : 'border-slate-700 bg-slate-900/60 text-slate-400'
               }`}
             >
-              {pb.kotak?.configured ? 'Configured' : 'Optional'}
+              {defaultProvider === 'kotak'
+                ? 'Default'
+                : pb.kotak?.configured
+                  ? 'Fallback · Configured'
+                  : 'Optional'}
             </span>
           </div>
 
@@ -339,7 +407,7 @@ export default function BrokerApi() {
             <div>
               <h3 className="text-sm font-semibold text-white">Upstox</h3>
               <p className="mt-1 text-xs text-admin-muted">
-                After Fyers · before Kotak (`ORDER_FLOW_PROVIDER=auto`).
+                Fallback / Order Flow option chain. Paste daily access token when needed.
               </p>
             </div>
             <span
@@ -349,7 +417,11 @@ export default function BrokerApi() {
                   : 'border-slate-700 bg-slate-900/60 text-slate-400'
               }`}
             >
-              {pb.upstox?.configured ? 'Configured' : 'Optional'}
+              {defaultProvider === 'upstox'
+                ? 'Default'
+                : pb.upstox?.configured
+                  ? 'Fallback · Configured'
+                  : 'Optional'}
             </span>
           </div>
 
@@ -382,7 +454,8 @@ export default function BrokerApi() {
             {saving ? 'Saving…' : 'Save broker credentials'}
           </button>
           <p className="text-[11px] text-admin-muted">
-            One save updates Fyers + Kotak + Upstox. Masked fields keep the previous secret.
+            One save updates default + Fyers + Kotak + Upstox and restarts the live feed. Masked
+            fields keep the previous secret.
           </p>
         </div>
       </form>

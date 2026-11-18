@@ -709,7 +709,7 @@ router.get('/public-signup-settings', (_req, res) => {
 
 router.post('/settings/broker', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { brokerProvider, dhanConfig, fyers, kotak, upstox } = req.body || {};
+    const { brokerProvider, dhanConfig, fyers, kotak, upstox, defaultProvider } = req.body || {};
 
     // Legacy Dhan fields (kept for compatibility)
     if (brokerProvider) systemSettings.brokerProvider = brokerProvider;
@@ -721,19 +721,21 @@ router.post('/settings/broker', authMiddleware, adminOnly, async (req, res) => {
       systemSettings.dhanConfig = next;
     }
 
-    // Platform live feed: Fyers (default) + Kotak + Upstox in one save
+    // Platform live feed: credentials + admin-selected default provider
     let platformBroker = getPlatformBrokerPublic();
-    if (fyers || kotak || upstox) {
+    if (fyers || kotak || upstox || defaultProvider) {
       platformBroker = await savePlatformBroker({
         fyers: fyers || {},
         kotak: kotak || {},
-        upstox: upstox || {}
+        upstox: upstox || {},
+        defaultProvider
       });
     }
 
+    const priorityLabel = (platformBroker.priority || []).join(' → ') || 'kotak → fyers → upstox';
     res.json({
       success: true,
-      message: 'Broker credentials saved. Platform priority: Fyers → Upstox → Kotak.',
+      message: `Broker credentials saved. Default: ${platformBroker.defaultProvider || 'kotak'}. Priority: ${priorityLabel}.`,
       settings: {
         ...maskBrokerSettings(systemSettings),
         platformBroker

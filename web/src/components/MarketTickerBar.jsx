@@ -7,12 +7,17 @@ export default function MarketTickerBar({
   stocks = [],
   onSelectStock
 }) {
+  const hasPrice = (p) => Number(p) > 0;
+
   const filteredStocks = (stocks || []).filter(
-    (s) => s.symbol !== 'NIFTY 50' && s.symbol !== 'BANKNIFTY'
+    (s) =>
+      s.symbol !== 'NIFTY 50' &&
+      s.symbol !== 'BANKNIFTY' &&
+      hasPrice(s.currentPrice)
   );
 
   const baseItems = [];
-  if (niftyData?.currentPrice != null) {
+  if (hasPrice(niftyData?.currentPrice)) {
     baseItems.push({
       symbol: 'NIFTY 50',
       name: 'Nifty 50',
@@ -21,7 +26,7 @@ export default function MarketTickerBar({
       isIndex: true
     });
   }
-  if (bankNiftyData?.currentPrice != null) {
+  if (hasPrice(bankNiftyData?.currentPrice)) {
     baseItems.push({
       symbol: 'BANKNIFTY',
       name: 'Bank Nifty',

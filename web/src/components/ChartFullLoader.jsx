@@ -3,10 +3,17 @@ import { createPortal } from 'react-dom';
 
 /**
  * Full-viewport chart loader (separate from Terminal / page spinners).
- * Shown until candles resolve (Fyers → Upstox → Kotak on server).
+ * Platform membership: never show which broker (Kotak/Fyers/Upstox).
  */
-export default function ChartFullLoader({ symbol, timeframe = '5m', rangeKey = '5D' }) {
+export default function ChartFullLoader({
+  symbol,
+  timeframe = '5m',
+  rangeKey = '5D',
+  feedLabel = null
+}) {
   if (typeof document === 'undefined') return null;
+
+  const source = feedLabel || 'Loading live chart';
 
   return createPortal(
     <div
@@ -42,9 +49,7 @@ export default function ChartFullLoader({ symbol, timeframe = '5m', rangeKey = '
             </div>
           </div>
 
-          <p className="mt-4 text-[10px] font-medium text-slate-500">
-            Fyers → Upstox → Kotak
-          </p>
+          <p className="mt-4 text-[10px] font-medium text-slate-500">{source}</p>
         </div>
       </div>
 

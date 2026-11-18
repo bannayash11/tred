@@ -1,7 +1,7 @@
 /**
- * Platform (server-plan) broker credentials — Fyers (default) + Kotak + Upstox —
- * managed from Admin in one save. Secrets encrypted in Settings DB.
- * Applied to process.env + live Fyers / Kotak / Order Flow runtime.
+ * Platform (server-plan) broker credentials — Kotak / Fyers / Upstox —
+ * managed from Admin in one save. Admin picks defaultProvider; others are fallback.
+ * Secrets encrypted in Settings DB. Applied to process.env + live runtime.
  */
 import { Settings } from '../models/Settings.js';
 import { encryptObject, decryptObject, maskSecret } from '../utils/cryptoSecrets.js';
@@ -9,6 +9,8 @@ import { kotakNeoService } from './kotakNeoService.js';
 import { fyersService } from './fyersService.js';
 
 const SETTINGS_KEY = 'platform_broker';
+
+export const PLATFORM_FEED_PROVIDERS = ['kotak', 'fyers', 'upstox'];
 
 const EMPTY_FYERS = {
   appId: '',
@@ -31,13 +33,33 @@ const EMPTY_UPSTOX = {
   accessToken: ''
 };
 
+export function normalizeFeedProvider(value, fallback = 'kotak') {
+  const s = String(value || '')
+    .toLowerCase()
+    .trim();
+  if (PLATFORM_FEED_PROVIDERS.includes(s)) return s;
+  return fallback;
+}
+
 /** In-memory plaintext after load (never sent to client unmasked). */
 let runtime = {
   fyers: { ...EMPTY_FYERS },
   kotak: { ...EMPTY_KOTAK },
   upstox: { ...EMPTY_UPSTOX },
+  defaultProvider: 'kotak',
   updatedAt: null
 };
+
+export function getPlatformFeedPriority() {
+  const primary = normalizeFeedProvider(
+    runtime.defaultProvider || process.env.PLATFORM_FEED_DEFAULT || 'kotak'
+  );
+  return [primary, ...PLATFORM_FEED_PROVIDERS.filter((p) => p !== primary)];
+}
+
+export function getPlatformDefaultProvider() {
+  return getPlatformFeedPriority()[0];
+}
 
 function isMasked(value) {
   const s = String(value || '');
@@ -60,6 +82,8 @@ export function getPlatformBrokerRuntime() {
     fyers: { ...runtime.fyers },
     kotak: { ...runtime.kotak },
     upstox: { ...runtime.upstox },
+    defaultProvider: getPlatformDefaultProvider(),
+    priority: getPlatformFeedPriority(),
     updatedAt: runtime.updatedAt
   };
 }
@@ -69,8 +93,19 @@ export function getPlatformBrokerPublic() {
   const f = runtime.fyers;
   const k = runtime.kotak;
   const u = runtime.upstox;
+  const priority = getPlatformFeedPriority();
+  const configured = {
+    fyers: Boolean(f.appId && f.accessToken),
+    kotak: Boolean(k.consumerKey && k.ucc && k.mobileNumber && k.mpin && k.totpKey),
+    upstox: Boolean(u.accessToken)
+  };
+  const primary =
+    priority.find((p) => configured[p]) ||
+    (configured.kotak ? 'kotak' : configured.fyers ? 'fyers' : configured.upstox ? 'upstox' : null);
   return {
-    primary: f.appId && f.accessToken ? 'fyers' : k.consumerKey ? 'kotak' : u.accessToken ? 'upstox' : null,
+    primary,
+    defaultProvider: getPlatformDefaultProvider(),
+    priority,
     fyers: {
       appId: f.appId || '',
       appSecret: f.appSecret ? maskSecret(f.appSecret, 4) : '',
@@ -78,7 +113,7 @@ export function getPlatformBrokerPublic() {
       refreshToken: f.refreshToken ? maskSecret(f.refreshToken, 4) : '',
       pin: f.pin ? '••••••' : '',
       redirectUri: f.redirectUri || EMPTY_FYERS.redirectUri,
-      configured: Boolean(f.appId && f.accessToken),
+      configured: configured.fyers,
       canAutoRefresh: Boolean(f.appId && f.appSecret && f.refreshToken && f.pin)
     },
     kotak: {
@@ -87,11 +122,11 @@ export function getPlatformBrokerPublic() {
       mobileNumber: k.mobileNumber ? maskSecret(k.mobileNumber, 4) : '',
       mpin: k.mpin ? '••••••' : '',
       totpKey: k.totpKey ? '••••••••' : '',
-      configured: Boolean(k.consumerKey && k.ucc && k.mobileNumber && k.mpin && k.totpKey)
+      configured: configured.kotak
     },
     upstox: {
       accessToken: u.accessToken ? maskSecret(u.accessToken, 4) : '',
-      configured: Boolean(u.accessToken)
+      configured: configured.upstox
     },
     updatedAt: runtime.updatedAt,
     source: 'admin+env'
@@ -116,6 +151,8 @@ export function applyPlatformBrokerToEnv() {
   if (k.mpin) process.env.KOTAK_MPIN = k.mpin;
   if (k.totpKey) process.env.KOTAK_TOTP_KEY = k.totpKey;
   if (u.accessToken) process.env.UPSTOX_ACCESS_TOKEN = u.accessToken;
+
+  process.env.PLATFORM_FEED_DEFAULT = getPlatformDefaultProvider();
 
   if (typeof fyersService.applyCredentials === 'function') {
     fyersService.applyCredentials({
@@ -163,6 +200,7 @@ export function seedRuntimeFromEnv() {
     upstox: {
       accessToken: process.env.UPSTOX_ACCESS_TOKEN || ''
     },
+    defaultProvider: normalizeFeedProvider(process.env.PLATFORM_FEED_DEFAULT || 'kotak'),
     updatedAt: null
   };
 }
@@ -184,6 +222,9 @@ export async function loadPlatformBrokerFromDb() {
       fyers: { ...EMPTY_FYERS, ...(plain.fyers || {}) },
       kotak: { ...EMPTY_KOTAK, ...(plain.kotak || {}) },
       upstox: { ...EMPTY_UPSTOX, ...(plain.upstox || {}) },
+      defaultProvider: normalizeFeedProvider(
+        plain.defaultProvider || process.env.PLATFORM_FEED_DEFAULT || 'kotak'
+      ),
       updatedAt: doc.updatedAt || null
     };
     // Env can fill gaps if admin never saved broker creds yet
@@ -205,9 +246,24 @@ export async function loadPlatformBrokerFromDb() {
     if (!runtime.upstox.accessToken && process.env.UPSTOX_ACCESS_TOKEN) {
       runtime.upstox.accessToken = process.env.UPSTOX_ACCESS_TOKEN;
     }
+    if (!runtime.kotak.consumerKey && process.env.KOTAK_CONSUMER_KEY) {
+      runtime.kotak.consumerKey = process.env.KOTAK_CONSUMER_KEY;
+    }
+    if (!runtime.kotak.ucc && process.env.KOTAK_UCC) {
+      runtime.kotak.ucc = process.env.KOTAK_UCC;
+    }
+    if (!runtime.kotak.mobileNumber && process.env.KOTAK_MOBILE_NUMBER) {
+      runtime.kotak.mobileNumber = process.env.KOTAK_MOBILE_NUMBER;
+    }
+    if (!runtime.kotak.mpin && process.env.KOTAK_MPIN) {
+      runtime.kotak.mpin = process.env.KOTAK_MPIN;
+    }
+    if (!runtime.kotak.totpKey && process.env.KOTAK_TOTP_KEY) {
+      runtime.kotak.totpKey = process.env.KOTAK_TOTP_KEY;
+    }
     applyPlatformBrokerToEnv();
     console.log(
-      `[PlatformBroker] Loaded · Fyers=${runtime.fyers.accessToken ? 'yes' : 'no'} · Kotak=${runtime.kotak.consumerKey ? 'yes' : 'no'} · Upstox=${runtime.upstox.accessToken ? 'yes' : 'no'}`
+      `[PlatformBroker] Loaded · default=${getPlatformDefaultProvider()} · priority=${getPlatformFeedPriority().join('→')} · Fyers=${runtime.fyers.accessToken ? 'yes' : 'no'} · Kotak=${runtime.kotak.consumerKey ? 'yes' : 'no'} · Upstox=${runtime.upstox.accessToken ? 'yes' : 'no'}`
     );
   } catch (err) {
     console.warn('[PlatformBroker] load failed, using .env:', err.message);
@@ -217,10 +273,15 @@ export async function loadPlatformBrokerFromDb() {
 }
 
 /**
- * Save Fyers + Kotak + Upstox together (one admin submit).
+ * Save Fyers + Kotak + Upstox + defaultProvider together (one admin submit).
  * Masked / empty secret fields keep previous values.
  */
-export async function savePlatformBroker({ fyers = {}, kotak = {}, upstox = {} } = {}) {
+export async function savePlatformBroker({
+  fyers = {},
+  kotak = {},
+  upstox = {},
+  defaultProvider
+} = {}) {
   const nextFyers = mergeSecretFields(runtime.fyers, fyers, [
     'appId',
     'appSecret',
@@ -259,18 +320,24 @@ export async function savePlatformBroker({ fyers = {}, kotak = {}, upstox = {} }
   }
 
   const nextUpstox = mergeSecretFields(runtime.upstox, upstox, ['accessToken']);
+  const nextDefault = normalizeFeedProvider(
+    defaultProvider !== undefined ? defaultProvider : runtime.defaultProvider,
+    'kotak'
+  );
 
   runtime = {
     fyers: nextFyers,
     kotak: nextKotak,
     upstox: nextUpstox,
+    defaultProvider: nextDefault,
     updatedAt: new Date()
   };
 
   const cipher = encryptObject({
     fyers: nextFyers,
     kotak: nextKotak,
-    upstox: nextUpstox
+    upstox: nextUpstox,
+    defaultProvider: nextDefault
   });
 
   await Settings.findOneAndUpdate(
@@ -303,11 +370,11 @@ export async function savePlatformBroker({ fyers = {}, kotak = {}, upstox = {} }
     /* optional */
   }
 
-  // Kick market data to prefer Fyers without full process restart
+  // Restart live feed with admin-selected default → fallbacks
   try {
     const { marketDataService } = await import('./marketDataService.js');
-    if (fyersService.configured && typeof marketDataService?.initFyersLiveFeed === 'function') {
-      void marketDataService.initFyersLiveFeed();
+    if (typeof marketDataService?.restartPlatformLiveFeed === 'function') {
+      void marketDataService.restartPlatformLiveFeed();
     }
   } catch {
     /* optional */

@@ -215,19 +215,7 @@ io.on('connection', async (socket) => {
       screener: marketDataService.getScreenerData(),
       marketXRay: marketDataService.getMarketXRay(),
       openingMomentum: marketDataService.getOpeningMomentumData(),
-      feed: {
-        mode: 'server',
-        provider: process.env.FYERS_ACCESS_TOKEN
-          ? 'fyers'
-          : process.env.UPSTOX_ACCESS_TOKEN
-            ? 'upstox'
-            : 'kotak',
-        label: process.env.FYERS_ACCESS_TOKEN
-          ? 'Platform · Fyers'
-          : process.env.UPSTOX_ACCESS_TOKEN
-            ? 'Platform · Upstox'
-            : 'Platform · Kotak'
-      }
+      feed: marketDataService.getActiveFeedMeta()
     });
   }
 

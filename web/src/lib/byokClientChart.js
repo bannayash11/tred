@@ -1,7 +1,7 @@
 /**
  * BYOK charts: load candles from the user's broker in the browser
  * (thin CORS proxy only if the broker blocks browser Origin).
- * Platform / server-plan charts still use the backend Kotak feed.
+ * Platform / server-plan charts use the backend active feed (Kotak / Fyers / Upstox).
  */
 import {
   fetchByokMarketClientApi,

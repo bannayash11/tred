@@ -190,11 +190,24 @@ export function createUpstoxEquityAdapter({ accessToken } = {}) {
       if (unit === 'days') {
         data = await get(`/v3/historical-candle/${q}/days/${interval}/${to}/${from}`);
       } else {
-        // Prefer dated history; fall back to intraday for today
+        // Dated history often omits the live IST session — always merge intraday for today.
         try {
           data = await get(`/v3/historical-candle/${q}/minutes/${interval}/${to}/${from}`);
         } catch {
-          data = await get(`/v3/historical-candle/intraday/${q}/minutes/${interval}`);
+          data = { candles: [] };
+        }
+        try {
+          const intra = await get(`/v3/historical-candle/intraday/${q}/minutes/${interval}`);
+          const hist = Array.isArray(data?.candles) ? data.candles : [];
+          const today = Array.isArray(intra?.candles) ? intra.candles : [];
+          const byTs = new Map();
+          for (const row of [...hist, ...today]) {
+            if (!row?.[0]) continue;
+            byTs.set(String(row[0]), row);
+          }
+          data = { candles: [...byTs.values()] };
+        } catch {
+          /* keep dated history only */
         }
       }
       const rows = data?.candles || [];

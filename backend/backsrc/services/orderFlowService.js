@@ -360,20 +360,25 @@ class OrderFlowService {
         });
       // Hydrate memory from disk so cards with cached candles paint instantly.
       this.hydrateFuturesFromDisk(session, symbols);
-      // Futures charts first — pause quote/SFeed so Kotak RPS fills candle cache fast.
-      kotakNeoService.pauseLiveFeed();
-      const head = symbols.slice(0, 12);
-      const tail = symbols.slice(12);
-      void this.prefetchFutures(head, session)
-        .then(() => this.prefetchFutures(tail, session))
-        .catch(() => {})
-        .finally(() => {
-          kotakNeoService.resumeLiveFeed();
-        })
-        .then(() => {
-          if (!live) return this.expandMissingSeries(session);
-          return this.build();
-        });
+      if (live) {
+        // Market hours: do not stampede Upstox/Kotak — live chart LTP needs the pipe.
+        console.log(
+          '[OrderFlow] Live session — serving cache only (no prefetch/rebuild) so charts can tick'
+        );
+      } else {
+        // After hours: warm futures + expand All F&O.
+        const pauseKotak = this.feed === 'kotak';
+        if (pauseKotak) kotakNeoService.pauseLiveFeed();
+        const head = symbols.slice(0, 12);
+        const tail = symbols.slice(12);
+        void this.prefetchFutures(head, session)
+          .then(() => this.prefetchFutures(tail, session))
+          .catch(() => {})
+          .finally(() => {
+            if (pauseKotak) kotakNeoService.resumeLiveFeed();
+          })
+          .then(() => this.expandMissingSeries(session));
+      }
     } else {
       // No usable cache — still don't block initialize; publish as series arrive.
       void this.build();
@@ -394,7 +399,8 @@ class OrderFlowService {
       return;
     }
     this._expanding = true;
-    kotakNeoService.pauseLiveFeed();
+    const pauseKotakExpand = this.feed === 'kotak';
+    if (pauseKotakExpand) kotakNeoService.pauseLiveFeed();
     console.log(`[OrderFlow] Expanding All F&O · ${missing.length} missing`);
     const series = [...(this.state.latest?.series || [])];
     const ladders = { ...(this.state.latest?.ladders || {}) };
@@ -434,7 +440,8 @@ class OrderFlowService {
           } catch (err) {
             failed.push(u.symbol);
             if (String(err.message || '').includes('429')) {
-              await new Promise((r) => setTimeout(r, 15_000));
+              // Leave headroom for live chart LTP pumps
+              await new Promise((r) => setTimeout(r, 45_000));
             }
           }
         }
@@ -448,7 +455,7 @@ class OrderFlowService {
       );
     } finally {
       this._expanding = false;
-      kotakNeoService.resumeLiveFeed();
+      if (pauseKotakExpand) kotakNeoService.resumeLiveFeed();
     }
   }
 
@@ -473,12 +480,12 @@ class OrderFlowService {
 
   /**
    * Kotak APIs already go through kotakNeoService.gatedRequest — do NOT wrap again
-   * (nested gate deadlocks). Upstox has no internal Kotak gate, so serialize via runThroughGate.
+   * (nested gate deadlocks). Upstox must NOT use the Kotak gate: Upstox 429 was
+   * freezing Kotak LTP / chart ticks via shared backoff.
    */
   async throttled(fn) {
     try {
-      if (this.feed === 'kotak') return await fn();
-      return await kotakNeoService.runThroughGate(fn);
+      return await fn();
     } catch (err) {
       console.warn('[OrderFlow] request error:', err.message);
       throw err;
@@ -905,8 +912,9 @@ class OrderFlowService {
     if (this.state.building) return;
     if (!this.state.ready) return;
     this.state.building = true;
-    // Let Order Flow own the Kotak pipe; quote poll resumes in finally
-    kotakNeoService.pauseLiveFeed();
+    // Only steal Kotak RPS when Order Flow is on Kotak; Upstox OF must leave Terminal live alone.
+    const pauseKotakBuild = this.feed === 'kotak';
+    if (pauseKotakBuild) kotakNeoService.pauseLiveFeed();
     const started = Date.now();
     const clock = Date.now();
     const session = getLatestTradingSessionDate(new Date(clock));
@@ -996,7 +1004,7 @@ class OrderFlowService {
       }
     } finally {
       this.state.building = false;
-      kotakNeoService.resumeLiveFeed();
+      if (pauseKotakBuild) kotakNeoService.resumeLiveFeed();
     }
   }
 
@@ -1013,6 +1021,13 @@ class OrderFlowService {
       setTimeout(async () => {
         // Never interrupt futures candle warm — charts stay on "Loading future…" otherwise.
         if (this._prefetching) {
+          tick();
+          return;
+        }
+        const nowLive = isMarketSessionTime(Date.now());
+        const seriesCount = this.state.latest?.series?.length || 0;
+        // Live + usable cache: skip rebuild so chart/ticker LTP keeps the broker pipe.
+        if (nowLive && seriesCount >= 40) {
           tick();
           return;
         }

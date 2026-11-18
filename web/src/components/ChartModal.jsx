@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
+import { useOutletContext } from 'react-router-dom';
 import {
   X,
   TrendingUp,
@@ -14,6 +15,7 @@ import {
 import { fetchStock, getSocket } from '../services/api';
 import { getMembership } from '../lib/membership';
 import { fetchByokClientStock, isByokChartUser } from '../lib/byokClientChart';
+import { pickChartFeed } from '../lib/feedProvider';
 import ManualKotakChart, {
   loadSavedOverlays,
   saveOverlays,
@@ -142,6 +144,8 @@ function checkIsMarketOpen() {
 
 /** Stock chart + SMC anatomy. Use asPage for full-page layout instead of modal. */
 export default function ChartModal({ symbol, onClose, asPage = false }) {
+  const layoutCtx = useOutletContext() || {};
+  const layoutFeed = layoutCtx.feedMeta || null;
   const authUser = useSelector((state) => state.auth.user);
   const plans = useSelector((state) => state.content?.plans || []);
   const membership = getMembership(authUser, plans);
@@ -187,17 +191,20 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const activeOverlayCount = OVERLAY_OPTIONS.filter((opt) => overlays[opt.key]).length;
 
   const [stockData, setStockData] = useState(null);
+  const [chartFeed, setChartFeed] = useState(() => pickChartFeed({ layoutFeed }));
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
   const [livePrice, setLivePrice] = useState(null);
   const [liveChange, setLiveChange] = useState(null);
   const [priceFlash, setPriceFlash] = useState(null); // 'up' | 'down' | null
+  const [tickAlive, setTickAlive] = useState(false);
   const [isMarketOpen, setIsMarketOpen] = useState(checkIsMarketOpen());
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const seriesRef = useRef(null);
   const currentCandleRef = useRef(null);
   const indicatorSeriesRef = useRef(null);
   const indicatorMenuRef = useRef(null);
+  const tickAliveRef = useRef(false);
   const rangeDays = RANGE_OPTIONS.find((r) => r.key === rangeKey)?.days || 5;
   const activeIndicators = INDICATOR_OPTIONS.filter((opt) => overlays[opt.key]);
 
@@ -232,22 +239,38 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
 
   const useClientBrokerChart = isByokChartUser(authUser);
 
-  // 1. Candles: BYOK → browser/broker; Platform → server Kotak
+  useEffect(() => {
+    if (!layoutFeed) return;
+    setChartFeed((prev) => pickChartFeed({ layoutFeed, stockFeed: prev }) || prev);
+  }, [layoutFeed]);
+
+  // 1. Candles: keep full-screen loader until API returns real candles (no empty chart flash)
   useEffect(() => {
     let isMounted = true;
     let cancelled = false;
     setLoading(true);
     setFetchError('');
+    setStockData(null);
+    setTickAlive(false);
+    tickAliveRef.current = false;
 
     const loadOnce = () =>
       useClientBrokerChart
         ? fetchByokClientStock(symbol, { timeframe, rangeDays })
         : fetchStock(symbol, { timeframe, rangeDays });
 
-    const applyStock = (stock) => {
+    const applyStock = (stock, res = {}) => {
       setStockData(stock);
       setLivePrice(stock.currentPrice);
       setLiveChange(stock.change);
+      setChartFeed(
+        pickChartFeed({
+          responseFeed: res.feed,
+          stockFeed: stock.feed,
+          layoutFeed,
+          chartProvider: stock.chartProvider
+        })
+      );
     };
 
     const emptyMsg = useClientBrokerChart
@@ -256,61 +279,173 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
 
     (async () => {
       let lastErr = null;
-      // First open often races Kotak warm / 429 — retry before showing empty.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      // Broker warm / 429: keep loader and retry until candles arrive
+      const maxAttempts = 12;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (cancelled) return;
         try {
           const res = await loadOnce();
           if (cancelled || !isMounted) return;
-          if (res.success && res.stock?.candles?.length && res.stock.dataSource === 'live') {
-            applyStock(res.stock);
+          if (res.feed) {
+            setChartFeed(
+              pickChartFeed({
+                responseFeed: res.feed,
+                layoutFeed,
+                chartProvider: res.stock?.chartProvider
+              })
+            );
+          }
+          const candles = res.stock?.candles;
+          if (res.success && Array.isArray(candles) && candles.length > 0) {
+            applyStock(res.stock, res);
             setFetchError('');
+            if (isMounted) setLoading(false);
             return;
           }
-          if (res.success && res.stock) {
-            applyStock(res.stock);
-            lastErr = emptyMsg;
-          } else {
-            lastErr = 'Unable to load live chart data.';
-          }
+          lastErr = emptyMsg;
         } catch (err) {
           console.error('Error fetching stock details:', err);
+          if (err.response?.data?.feed) {
+            setChartFeed(
+              pickChartFeed({
+                responseFeed: err.response.data.feed,
+                layoutFeed
+              })
+            );
+          }
           lastErr =
             err.message ||
             err.userMessage ||
             err.response?.data?.message ||
             'Failed to load live chart.';
         }
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        // Stay on loader while waiting for broker response / warm
+        if (attempt < maxAttempts - 1) {
+          await new Promise((r) => setTimeout(r, Math.min(4000, 800 + attempt * 350)));
         }
       }
       if (!cancelled && isMounted) {
         setFetchError(lastErr || emptyMsg);
+        setLoading(false);
       }
-    })().finally(() => {
-      if (isMounted) setLoading(false);
-    });
+    })();
 
     return () => {
       isMounted = false;
       cancelled = true;
     };
+    // layoutFeed is applied in a separate effect — do not refetch candles when feed meta updates
   }, [symbol, timeframe, rangeDays, useClientBrokerChart]);
 
-  // 2. Real-time Socket.io — platform feed only (BYOK charts are client/broker)
+  // 2. Real-time Socket.io — price + forming candle (tolerant of WS/REST gaps)
   useEffect(() => {
-    if (useClientBrokerChart) return undefined;
     const socket = getSocket();
+    const norm = (s) =>
+      String(s || '')
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, ' ');
+    const sym = norm(symbol);
+    const aliases = new Set(
+      [sym, sym.replace(/\s/g, ''), sym === 'NIFTY 50' ? 'NIFTY' : '', sym === 'NIFTY' ? 'NIFTY 50' : ''].filter(
+        Boolean
+      )
+    );
+
     socket.emit('SUBSCRIBE_STOCK', symbol);
+
+    const applyLiveCandle = (newPrice, serverCandle = null) => {
+      if (!seriesRef.current || !Number.isFinite(newPrice)) return;
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (!isNseSessionCandle(nowSec)) return;
+
+      const bucket =
+        serverCandle?.time && Number.isFinite(Number(serverCandle.time))
+          ? Number(serverCandle.time)
+          : getIstBucketStart(nowSec, timeframe);
+      const cur = currentCandleRef.current;
+      const ind = indicatorSeriesRef.current;
+
+      // If history last bar is ahead of "now" bucket, still paint LTP on that last bar
+      const useTime = cur && cur.time > bucket ? cur.time : bucket;
+      const newBar = !cur || cur.time < useTime;
+
+      let bar = null;
+      if (newBar) {
+        bar = sanitizeCandle({
+          time: useTime,
+          open: Number(serverCandle?.open) || newPrice,
+          high: Number(serverCandle?.high) || newPrice,
+          low: Number(serverCandle?.low) || newPrice,
+          close: Number(serverCandle?.close) || newPrice
+        });
+      } else {
+        bar = sanitizeCandle({
+          time: cur.time,
+          open: cur.open,
+          high: Math.max(cur.high, newPrice, Number(serverCandle?.high) || newPrice),
+          low: Math.min(cur.low, newPrice, Number(serverCandle?.low) || newPrice),
+          close: Number(serverCandle?.close) || newPrice
+        });
+      }
+      if (!bar) return;
+
+      try {
+        seriesRef.current.update(bar);
+        currentCandleRef.current = bar;
+      } catch {
+        // Lightweight Charts rejects out-of-order times — keep last bar close in sync
+        try {
+          if (cur) {
+            const fallback = sanitizeCandle({
+              time: cur.time,
+              open: cur.open,
+              high: Math.max(cur.high, newPrice),
+              low: Math.min(cur.low, newPrice),
+              close: newPrice
+            });
+            if (fallback) {
+              seriesRef.current.update(fallback);
+              currentCandleRef.current = fallback;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
+      if (ind?.ema9 && Number.isFinite(ind.baseEma9)) {
+        if (newBar && Number.isFinite(ind.lastEma9)) ind.baseEma9 = ind.lastEma9;
+        const k9 = 2 / (9 + 1);
+        const next9 = newPrice * k9 + ind.baseEma9 * (1 - k9);
+        ind.lastEma9 = next9;
+        try {
+          ind.ema9.update({ time: bar.time, value: next9 });
+        } catch {
+          /* ignore */
+        }
+      }
+      if (ind?.ema21 && Number.isFinite(ind.baseEma21)) {
+        if (newBar && Number.isFinite(ind.lastEma21)) ind.baseEma21 = ind.lastEma21;
+        const k21 = 2 / (21 + 1);
+        const next21 = newPrice * k21 + ind.baseEma21 * (1 - k21);
+        ind.lastEma21 = next21;
+        try {
+          ind.ema21.update({ time: bar.time, value: next21 });
+        } catch {
+          /* ignore */
+        }
+      }
+    };
 
     const handleTick = (ticks) => {
       if (!Array.isArray(ticks)) return;
-      const tick = ticks.find((t) => t.symbol === symbol);
+      const tick = ticks.find((t) => aliases.has(norm(t.symbol)));
       if (!tick) return;
 
       const newPrice = Number(tick.currentPrice);
-      if (!Number.isFinite(newPrice)) return;
+      if (!Number.isFinite(newPrice) || newPrice <= 0) return;
       const newChange = tick.change;
 
       setLivePrice((prev) => {
@@ -325,74 +460,61 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
         }
         return newPrice;
       });
-      setLiveChange(newChange);
+      if (newChange != null) setLiveChange(newChange);
+      tickAliveRef.current = true;
+      setTickAlive(true);
 
-      // Live candle + EMA tip updates during NSE session (Fyers / platform ticks)
-      const nowSec = Math.floor(Date.now() / 1000);
-      if (!isNseSessionCandle(nowSec) || !seriesRef.current) return;
-
-      const bucket = getIstBucketStart(nowSec, timeframe);
-      const cur = currentCandleRef.current;
-      const ind = indicatorSeriesRef.current;
-      const newBar = !cur || cur.time !== bucket;
-
-      if (newBar) {
-        const fresh = sanitizeCandle({
-          time: bucket,
-          open: newPrice,
-          high: newPrice,
-          low: newPrice,
-          close: newPrice
-        });
-        if (!fresh) return;
-        currentCandleRef.current = fresh;
-        seriesRef.current.update(fresh);
-      } else {
-        const updated = sanitizeCandle({
-          time: cur.time,
-          open: cur.open,
-          high: Math.max(cur.high, newPrice),
-          low: Math.min(cur.low, newPrice),
-          close: newPrice
-        });
-        if (!updated) return;
-        currentCandleRef.current = updated;
-        seriesRef.current.update(updated);
-      }
-
-      // Keep EMA lines moving with LTP on the active bar
-      if (ind?.ema9 && Number.isFinite(ind.baseEma9)) {
-        if (newBar && Number.isFinite(ind.lastEma9)) ind.baseEma9 = ind.lastEma9;
-        const k9 = 2 / (9 + 1);
-        const next9 = newPrice * k9 + ind.baseEma9 * (1 - k9);
-        ind.lastEma9 = next9;
-        try {
-          ind.ema9.update({ time: bucket, value: next9 });
-        } catch {
-          /* ignore */
-        }
-      }
-      if (ind?.ema21 && Number.isFinite(ind.baseEma21)) {
-        if (newBar && Number.isFinite(ind.lastEma21)) ind.baseEma21 = ind.lastEma21;
-        const k21 = 2 / (21 + 1);
-        const next21 = newPrice * k21 + ind.baseEma21 * (1 - k21);
-        ind.lastEma21 = next21;
-        try {
-          ind.ema21.update({ time: bucket, value: next21 });
-        } catch {
-          /* ignore */
-        }
-      }
+      applyLiveCandle(newPrice, tick.candle || null);
     };
 
     socket.on('MARKET_TICK', handleTick);
 
+    const onFeed = (payload) => {
+      if (payload?.feed) {
+        setChartFeed((prev) =>
+          pickChartFeed({
+            responseFeed: payload.feed,
+            stockFeed: prev,
+            layoutFeed: payload.feed
+          })
+        );
+      }
+    };
+    socket.on('INITIAL_STATE', onFeed);
+
+    // Soft refresh only when ticks are missing — avoid hammering brokers (429)
+    const softRefresh = window.setInterval(() => {
+      if (useClientBrokerChart) return;
+      if (!checkIsMarketOpen()) return;
+      if (tickAliveRef.current) return;
+      fetchStock(symbol, { timeframe, rangeDays })
+        .then((res) => {
+          if (!res?.success || !res.stock) return;
+          const px = Number(res.stock.currentPrice);
+          if (Number.isFinite(px) && px > 0) {
+            setLivePrice(px);
+            setLiveChange(res.stock.change);
+            tickAliveRef.current = true;
+            setTickAlive(true);
+            const candles = res.stock.candles;
+            const last = Array.isArray(candles) && candles.length ? candles[candles.length - 1] : null;
+            applyLiveCandle(px, last);
+          }
+        })
+        .catch(() => {});
+    }, 25_000);
+
     return () => {
       socket.off('MARKET_TICK', handleTick);
+      socket.off('INITIAL_STATE', onFeed);
       socket.emit('UNSUBSCRIBE_STOCK', symbol);
+      window.clearInterval(softRefresh);
     };
-  }, [symbol, timeframe, useClientBrokerChart]);
+  }, [symbol, timeframe, rangeDays, useClientBrokerChart]);
 
+  const activeProvider =
+    chartFeed?.chartProvider || chartFeed?.provider || stockData?.chartProvider || null;
+  const activeFeedLabel = chartFeed?.label || null;
 
   const currentDisplayPrice = livePrice ?? stockData?.currentPrice;
   const currentDisplayChange = liveChange ?? stockData?.change;
@@ -418,7 +540,16 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
   const content = (
       <div className={shellClass}>
         {loading ? (
-          <ChartFullLoader symbol={symbol} timeframe={timeframe} rangeKey={rangeKey} />
+          <ChartFullLoader
+            symbol={symbol}
+            timeframe={timeframe}
+            rangeKey={rangeKey}
+            feedLabel={
+              chartFeed?.mode === 'byok'
+                ? activeFeedLabel
+                : 'Loading live chart'
+            }
+          />
         ) : null}
         {/* Header */}
         <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2e39] px-3 sm:px-6 py-3 sm:py-4 bg-[#1e222d]">
@@ -457,7 +588,12 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                     LIVE
                   </span>
                 )}
-                {/* Broker name stays backend-only — users just see LIVE */}
+                {/* Platform plans: never show Kotak/Fyers/Upstox — broker stays backend-only */}
+                {chartFeed?.mode === 'byok' && activeProvider && (
+                  <span className="rounded bg-slate-900/90 px-2 py-0.5 text-[10px] font-bold text-cyan-300 border border-cyan-800/40">
+                    Your broker
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 truncate">{stockData?.name}</p>
             </div>
@@ -491,12 +627,26 @@ export default function ChartModal({ symbol, onClose, asPage = false }) {
                 </div>
 
                 {isMarketOpen ? (
-                  <div className="flex items-center space-x-1.5 rounded-full bg-emerald-950/80 px-2.5 py-1 text-[10px] font-bold text-emerald-400 border border-emerald-800/60 shadow-sm shadow-emerald-500/10">
+                  <div
+                    className={`flex items-center space-x-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold border shadow-sm ${
+                      tickAlive
+                        ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/60 shadow-emerald-500/10'
+                        : 'bg-amber-950/50 text-amber-300 border-amber-800/50'
+                    }`}
+                  >
                     <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      {tickAlive && (
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      )}
+                      <span
+                        className={`relative inline-flex rounded-full h-2 w-2 ${
+                          tickAlive ? 'bg-emerald-500' : 'bg-amber-400'
+                        }`}
+                      ></span>
                     </span>
-                    <span className="font-mono uppercase tracking-wider">LIVE STREAM</span>
+                    <span className="font-mono uppercase tracking-wider">
+                      {tickAlive ? 'LIVE STREAM' : 'WAITING TICKS'}
+                    </span>
                   </div>
                 ) : (
                   <div className="flex items-center space-x-1.5 rounded-full bg-slate-800/80 px-2.5 py-1 text-[10px] font-bold text-slate-300 border border-slate-700/60 shadow-sm">

@@ -178,7 +178,12 @@ class FyersService {
       msg.includes('valid token') ||
       msg.includes('unauthorized') ||
       msg.includes('token') ||
-      msg.includes('sebi')
+      msg.includes('sebi') ||
+      msg.includes('plan limit') ||
+      msg.includes('5000') ||
+      msg.includes('rate limit') ||
+      msg.includes('quota') ||
+      msg.includes('too many')
     );
   }
 

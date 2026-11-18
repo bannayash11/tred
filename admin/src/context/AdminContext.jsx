@@ -371,7 +371,7 @@ export function AdminProvider({ children }) {
         ...(res.settings || {}),
         platformBroker: res.settings?.platformBroker || prev.platformBroker
       }));
-      showToast(res.message || 'Broker credentials saved (Fyers default)!');
+      showToast(res.message || 'Broker credentials saved!');
       return res;
     } catch (err) {
       showToast(err.response?.data?.message || err.userMessage || 'Could not save broker credentials.');

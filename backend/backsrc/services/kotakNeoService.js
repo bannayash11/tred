@@ -359,6 +359,28 @@ class KotakNeoService {
   }
 
   /**
+   * Fetch live quotes for a small symbol set (chart / ticker) — 1–2 batches max.
+   * priority=true bypasses the shared gate so candle-warm / OF history cannot stall LTP.
+   */
+  async fetchLiveQuotesForSymbols(symbols = [], { priority = false } = {}) {
+    if (!this.isLoggedIn || !this.baseUrl) {
+      const logged = await this.login();
+      if (!logged) return null;
+    }
+    const want = new Set(
+      (symbols || []).map((s) =>
+        String(s || '')
+          .trim()
+          .toUpperCase()
+      )
+    );
+    if (!want.size) return [];
+    const mapped = this.tokenMap.filter((m) => want.has(String(m.symbol).toUpperCase()));
+    if (!mapped.length) return [];
+    return this._fetchQuoteBatches(mapped, { priority });
+  }
+
+  /**
    * Fetch live quotes from Kotak Neo for all mapped stocks
    */
   async fetchLiveQuotes() {
@@ -368,39 +390,56 @@ class KotakNeoService {
     }
 
     try {
-      // Build neo_symbols query (batch chunks of 15)
-      const batches = [];
-      const batchSize = 15;
-      for (let i = 0; i < this.tokenMap.length; i += batchSize) {
-        batches.push(this.tokenMap.slice(i, i + batchSize));
-      }
-
-      const quotesList = [];
-
-      for (const batch of batches) {
-        const neoSymbols = batch.map((item) => `${item.segment}|${item.token}`).join(',');
-        const encodedSymbols = encodeURIComponent(neoSymbols).replace(/%7C/g, '|').replace(/%2C/g, ',');
-
-        const res = await this.gatedRequest({
-          hostname: this.baseUrl,
-          path: `/script-details/1.0/quotes/neosymbol/${encodedSymbols}/all`,
-          method: 'GET',
-          headers: {
-            Authorization: this.consumerKey,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        });
-
-        if (res.statusCode === 200 && Array.isArray(res.data)) {
-          quotesList.push(...res.data);
-        }
-      }
-
-      return quotesList;
+      return await this._fetchQuoteBatches(this.tokenMap);
     } catch (err) {
       console.error('[KotakNeoService] Quotes fetch error:', err.message);
       return null;
     }
+  }
+
+  async _fetchQuoteBatches(tokenRows = [], { priority = false } = {}) {
+    const batches = [];
+    const batchSize = 15;
+    for (let i = 0; i < tokenRows.length; i += batchSize) {
+      batches.push(tokenRows.slice(i, i + batchSize));
+    }
+
+    const quotesList = [];
+    for (const batch of batches) {
+      const neoSymbols = batch.map((item) => `${item.segment}|${item.token}`).join(',');
+      const encodedSymbols = encodeURIComponent(neoSymbols).replace(/%7C/g, '|').replace(/%2C/g, ',');
+
+      const opts = {
+        hostname: this.baseUrl,
+        path: `/script-details/1.0/quotes/neosymbol/${encodedSymbols}/all`,
+        method: 'GET',
+        headers: {
+          Authorization: this.consumerKey,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      };
+
+      let res;
+      if (priority) {
+        // Dedicated lean lane — do not wait behind history warm / gate backoff.
+        const gap = Math.max(0, 1200 - (Date.now() - (this._leanQuoteAt || 0)));
+        if (gap > 0) await this.sleep(gap);
+        this._leanQuoteAt = Date.now();
+        res = await this.makeRequest(opts);
+        if (res.statusCode === 429) {
+          const waitMs = Math.min(Math.max(Number(res.data?.rateLimit?.['Retry-After']) || 6, 4) * 1000, 15_000);
+          await this.sleep(waitMs);
+          res = await this.makeRequest(opts);
+        }
+      } else {
+        res = await this.gatedRequest(opts);
+      }
+
+      if (res.statusCode === 200 && Array.isArray(res.data)) {
+        quotesList.push(...res.data);
+      }
+    }
+    return quotesList;
   }
 
   quotesToTicks(quotes) {
@@ -470,30 +509,67 @@ class KotakNeoService {
       onStatus: (st) => {
         this.feedWsAlive = Boolean(st?.ok);
         console.log(`[KotakNeoService] SFeed: ${st?.message || ''}`);
+        // Matrix auth fail → lean REST ticks immediately (full universe causes 429)
+        if (!st?.ok && this._tickCallback && !this.pollPaused) {
+          void this.pushRestQuotesOnce({ leanOnly: true });
+        }
       }
     });
     this.feedWs.start();
     return true;
   }
 
+  async pushRestQuotesOnce({ leanOnly = false } = {}) {
+    if (this.pollPaused) return;
+    // Full-universe poll waits for a quiet gate; lean chart symbols still try.
+    if (!leanOnly && this.isGateBusy()) return;
+    try {
+      const lean = [
+        'NIFTY 50',
+        'BANKNIFTY',
+        'RELIANCE',
+        'HDFCBANK',
+        'ICICIBANK',
+        'SBIN',
+        'INFY',
+        'TCS'
+      ];
+      const quotes = leanOnly
+        ? await this.fetchLiveQuotesForSymbols(lean, { priority: true })
+        : await this.fetchLiveQuotes();
+      const ticks = this.quotesToTicks(quotes);
+      if (ticks.length > 0 && typeof this._tickCallback === 'function') {
+        this._tickCallback(ticks);
+      }
+    } catch (err) {
+      console.warn('[KotakNeoService] REST quote push failed:', err.message);
+    }
+  }
+
   /**
    * Live ticks: Kotak SFeed WebSocket (market-speed) with REST poll fallback.
-   * Pauses while Order Flow build holds the gate (pauseLiveFeed).
+   * Pauses while Order Flow build holds the gate (pauseLiveFeed) — only when OF uses Kotak.
    */
   startLiveFeed(onTickCallback) {
     this._tickCallback = onTickCallback;
     if (this.pollInterval) clearInterval(this.pollInterval);
 
+    // Immediate REST bootstrap so Terminal is not stuck at ₹0 while WS connects
+    void this.pushRestQuotesOnce();
+
     const boot = async () => {
       await this.ensureSession();
-      // SFeed Matrix auth flaps burn rate limits — defer until Order Flow futures are warm.
+      void this.pushRestQuotesOnce();
       const { isMarketSessionTime } = await import('./orderFlow/marketSession.js');
       if (!isMarketSessionTime(Date.now())) {
-        console.log('[KotakNeoService] Outside session — SFeed deferred; REST poll only for bootstrap.');
+        console.log('[KotakNeoService] Outside session — REST poll only (no SFeed).');
         return;
       }
-      // Give Order Flow ~2 minutes to fill near-month candle cache before WS auth storms.
-      await new Promise((r) => setTimeout(r, 120_000));
+      const deferMs = Math.max(0, Number(process.env.KOTAK_WS_DEFER_MS) || 8_000);
+      if (deferMs > 0) {
+        console.log(`[KotakNeoService] SFeed starting in ${deferMs}ms…`);
+        await new Promise((r) => setTimeout(r, deferMs));
+      }
       if (this.pollPaused) return;
       const startedWs = this.startFeedWebSocket(onTickCallback);
       if (startedWs) {
@@ -506,14 +582,11 @@ class KotakNeoService {
     };
     void boot();
 
-    // REST fallback / bootstrap: skips when WS is healthy (avoids 429s)
+    // REST fallback while SFeed/Matrix is down — lean batch only (full universe 429s)
     this.pollInterval = setInterval(async () => {
       if (this.pollPaused) return;
       if (this.feedWsAlive) return;
-      if (this.isGateBusy()) return;
-      const quotes = await this.fetchLiveQuotes();
-      const ticks = this.quotesToTicks(quotes);
-      if (ticks.length > 0 && typeof onTickCallback === 'function') onTickCallback(ticks);
+      await this.pushRestQuotesOnce({ leanOnly: true });
     }, this.pollIntervalMs);
   }
 

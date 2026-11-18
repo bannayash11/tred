@@ -162,6 +162,195 @@ export class MarketDataService {
     this._upstoxToken = '';
     this._upstoxInit = null;
     this._upstoxPollInterval = null;
+    this.activeFeedProvider = null;
+    this.isRealData = false;
+    this._leanPump = null;
+    this._leanPumpBusy = false;
+  }
+
+  stopAllPlatformFeeds() {
+    try {
+      fyersService.stopLiveFeed();
+    } catch {
+      /* ignore */
+    }
+    try {
+      kotakNeoService.stopLiveFeed();
+    } catch {
+      /* ignore */
+    }
+    if (this._upstoxPollInterval) {
+      clearInterval(this._upstoxPollInterval);
+      this._upstoxPollInterval = null;
+    }
+    if (this.kotakRetryInterval) {
+      clearInterval(this.kotakRetryInterval);
+      this.kotakRetryInterval = null;
+    }
+    this.stopLeanLivePump();
+  }
+
+  /** Symbols that must tick like a broker app (open charts + indices + liquid names). */
+  _leanSymbolList() {
+    const set = new Set([
+      'NIFTY 50',
+      'BANKNIFTY',
+      'RELIANCE',
+      'HDFCBANK',
+      'ICICIBANK',
+      'SBIN',
+      'INFY',
+      'TCS'
+    ]);
+    for (const raw of this.priorityStocks) {
+      const s = String(raw || '')
+        .trim()
+        .toUpperCase();
+      if (!s) continue;
+      if (s === 'NIFTY' || s === 'NIFTY50') set.add('NIFTY 50');
+      else if (s === 'BANK NIFTY' || s === 'BNF') set.add('BANKNIFTY');
+      else set.add(s);
+    }
+    return [...set].filter((s) => this.stocks.has(s));
+  }
+
+  /**
+   * Fast LTP pump for open charts / ticker — small symbol set every ~2.5s.
+   * Uses Upstox first (when available), then Kotak lean batch. Keeps candles moving
+   * even when full-universe Kotak REST is 429 or SFeed Matrix auth is down.
+   */
+  startLeanLivePump() {
+    if (this._leanPump) return;
+    const pollMs = Math.max(2000, Number(process.env.LEAN_QUOTE_POLL_MS) || 2500);
+    console.log(`[MarketDataService] Lean live LTP pump every ${pollMs}ms (charts/ticker)`);
+
+    const tick = async () => {
+      if (this._leanPumpBusy) return;
+      this._leanPumpBusy = true;
+      try {
+        const symbols = this._leanSymbolList();
+        if (!symbols.length) return;
+        let ticks = [];
+
+        // Kotak first for live LTP — priority lane bypasses history/OF gate stalls
+        try {
+          const quotes = await kotakNeoService.fetchLiveQuotesForSymbols(symbols, {
+            priority: true
+          });
+          ticks = kotakNeoService.quotesToTicks(quotes || []);
+        } catch (err) {
+          if (!/429|rate limit/i.test(String(err.message || ''))) {
+            console.warn('[MarketDataService] Lean Kotak quotes:', err.message);
+          }
+        }
+
+        if (!ticks?.length && Date.now() > (this._upstoxLeanCooldownUntil || 0)) {
+          try {
+            const adapter = await this._ensureUpstoxAdapter();
+            if (adapter) {
+              ticks = await adapter.getQuotes(symbols);
+            }
+          } catch (err) {
+            if (/429|too many/i.test(String(err.message || ''))) {
+              this._upstoxLeanCooldownUntil = Date.now() + 30_000;
+            } else {
+              console.warn('[MarketDataService] Lean Upstox quotes:', err.message);
+            }
+          }
+        }
+
+        if (ticks?.length) {
+          this.isRealData = true;
+          this.handleRealTicks(ticks);
+          this._leanPumpOk = (this._leanPumpOk || 0) + 1;
+          if (this._leanPumpOk === 1 || this._leanPumpOk % 40 === 0) {
+            console.log(
+              `[MarketDataService] Lean LTP ok ×${this._leanPumpOk} · ${ticks
+                .slice(0, 4)
+                .map((t) => `${t.symbol}=${t.currentPrice}`)
+                .join(' ')}`
+            );
+          }
+        }
+      } finally {
+        this._leanPumpBusy = false;
+      }
+    };
+
+    void tick();
+    this._leanPump = setInterval(tick, pollMs);
+  }
+
+  stopLeanLivePump() {
+    if (this._leanPump) {
+      clearInterval(this._leanPump);
+      this._leanPump = null;
+    }
+    this._leanPumpBusy = false;
+  }
+
+  /**
+   * Start live feed using admin defaultProvider, then remaining fallbacks.
+   * Priority example (default=kotak): kotak → fyers → upstox
+   */
+  async startPlatformLiveFeed() {
+    const { getPlatformFeedPriority } = await import('./platformBrokerService.js');
+    const order = getPlatformFeedPriority();
+    console.log(`[MarketDataService] Platform feed priority: ${order.join(' → ')}`);
+
+    for (const provider of order) {
+      let ok = false;
+      if (provider === 'kotak') ok = await this.initKotakLiveFeed();
+      else if (provider === 'fyers') ok = await this.initFyersLiveFeed();
+      else if (provider === 'upstox') ok = await this.initUpstoxLiveFeed();
+      if (ok) {
+        console.log(`[MarketDataService] Live feed active: ${provider}`);
+        this.startLeanLivePump();
+        return provider;
+      }
+    }
+
+    console.warn('[MarketDataService] All platform brokers failed — no live ticks.');
+    this.isRealData = false;
+    this.activeFeedProvider = null;
+    return null;
+  }
+
+  async restartPlatformLiveFeed() {
+    this.stopAllPlatformFeeds();
+    this.activeFeedProvider = null;
+    this.isRealData = false;
+    return this.startPlatformLiveFeed();
+  }
+
+  /** Fail over from a dead provider to the next ones in admin priority. */
+  async failoverLiveFeed(fromProvider, reason = '') {
+    const dead = String(fromProvider || this.activeFeedProvider || '').toLowerCase();
+    if (this.activeFeedProvider && dead && this.activeFeedProvider !== dead) return;
+
+    console.warn(
+      `[MarketDataService] ${dead || 'feed'} dead → failover (${reason || 'error'}).`
+    );
+    this.stopAllPlatformFeeds();
+    this.activeFeedProvider = null;
+
+    const { getPlatformFeedPriority } = await import('./platformBrokerService.js');
+    const remaining = getPlatformFeedPriority().filter((p) => p !== dead);
+
+    for (const provider of remaining) {
+      let ok = false;
+      if (provider === 'kotak') ok = await this.initKotakLiveFeed();
+      else if (provider === 'fyers') ok = await this.initFyersLiveFeed();
+      else if (provider === 'upstox') ok = await this.initUpstoxLiveFeed();
+      if (ok) {
+        console.log(`[MarketDataService] Failover live feed → ${provider}`);
+        return provider;
+      }
+    }
+
+    console.warn('[MarketDataService] Failover exhausted — no live broker left.');
+    this.isRealData = false;
+    return null;
   }
 
   async _ensureUpstoxAdapter() {
@@ -198,6 +387,8 @@ export class MarketDataService {
   addPriorityStock(symbol) {
     if (symbol) {
       this.priorityStocks.add(symbol.toUpperCase());
+      // Ensure lean pump is running when someone opens a chart
+      this.startLeanLivePump();
     }
   }
 
@@ -214,7 +405,7 @@ export class MarketDataService {
     if (this.initialized) return;
     this.io = ioInstance;
 
-    console.log('[MarketDataService] Initializing F&O universe (Fyers → Upstox → Kotak — no dummy candles)...');
+    console.log('[MarketDataService] Initializing F&O universe (admin default → fallbacks — no dummy candles)...');
 
     for (const stock of FNO_UNIVERSE) {
       this.stocks.set(stock.symbol, {
@@ -238,14 +429,7 @@ export class MarketDataService {
     // Auto-freeze runs after live quotes calibrate / at 09:20 IST.
     await openingMomentumService.initialize(this.io);
 
-    // Priority: Fyers → Upstox → Kotak (last)
-    const fyersReady = await this.initFyersLiveFeed();
-    if (!fyersReady) {
-      const upstoxReady = await this.initUpstoxLiveFeed();
-      if (!upstoxReady) {
-        this.initKotakLiveFeed();
-      }
-    }
+    await this.startPlatformLiveFeed();
   }
 
   /**
@@ -293,23 +477,9 @@ export class MarketDataService {
     return true;
   }
 
-  /** When Fyers dies mid-session, move live feed to Upstox (then Kotak). */
+  /** When Fyers dies mid-session, move live feed along admin priority. */
   async failoverLiveFeedFromFyers(reason = '') {
-    if (this.activeFeedProvider && this.activeFeedProvider !== 'fyers') return;
-    console.warn(
-      `[MarketDataService] Fyers dead → failover (${reason || 'auth'}). Trying Upstox…`
-    );
-    try {
-      fyersService.stopLiveFeed();
-    } catch {
-      /* ignore */
-    }
-    this.activeFeedProvider = null;
-    const upstoxReady = await this.initUpstoxLiveFeed();
-    if (!upstoxReady) {
-      console.warn('[MarketDataService] Upstox failover failed — trying Kotak.');
-      await this.initKotakLiveFeed();
-    }
+    return this.failoverLiveFeed('fyers', reason);
   }
 
   /**
@@ -334,16 +504,14 @@ export class MarketDataService {
   }
 
   async activateUpstoxLiveFeed(adapter) {
-    if (this.activeFeedProvider === 'fyers' && fyersService.isUsable) {
-      console.log('[MarketDataService] Upstox online but Fyers remains primary feed.');
+    if (this.activeFeedProvider && this.activeFeedProvider !== 'upstox') {
+      console.log(
+        `[MarketDataService] Upstox ready but ${this.activeFeedProvider} remains primary feed.`
+      );
       return;
     }
-    try {
-      fyersService.stopLiveFeed();
-    } catch {
-      /* ignore */
-    }
-    console.log('🔥 [MarketDataService] UPSTOX LIVE NSE DATA CONNECTED (fallback)!');
+    this.stopAllPlatformFeeds();
+    console.log('🔥 [MarketDataService] UPSTOX LIVE NSE DATA CONNECTED!');
     this.isRealData = true;
     this.activeFeedProvider = 'upstox';
 
@@ -366,6 +534,7 @@ export class MarketDataService {
           stock.volume = t.volume || 0;
         }
         console.log(`[MarketDataService] Calibrated Upstox quotes for ${ticks.length} symbols.`);
+        this.broadcastScreener();
       }
     } catch (calibErr) {
       console.error('[MarketDataService] Upstox calibration error:', calibErr.message);
@@ -385,17 +554,19 @@ export class MarketDataService {
     void poll();
     this._upstoxPollInterval = setInterval(poll, pollMs);
     console.log(`[MarketDataService] Upstox quote poll started (${pollMs}ms)`);
+    this.startLeanLivePump();
     void this.warmRealCandles();
   }
 
   async activateFyersLiveFeed() {
-    console.log('🔥 [MarketDataService] FYERS LIVE NSE DATA CONNECTED (platform default)!');
+    this.stopAllPlatformFeeds();
+    console.log('🔥 [MarketDataService] FYERS LIVE NSE DATA CONNECTED!');
     this.isRealData = true;
     this.activeFeedProvider = 'fyers';
 
     fyersService.setUniverse(Array.from(this.stocks.keys()));
     fyersService.onAuthDead((reason) => {
-      void this.failoverLiveFeedFromFyers(reason);
+      void this.failoverLiveFeed('fyers', reason);
     });
 
     try {
@@ -412,6 +583,7 @@ export class MarketDataService {
           stock.volume = t.volume || 0;
         }
         console.log(`[MarketDataService] Calibrated Fyers quotes for ${ticks.length} symbols.`);
+        this.broadcastScreener();
       }
     } catch (calibErr) {
       console.error('[MarketDataService] Fyers calibration error:', calibErr.message);
@@ -419,11 +591,13 @@ export class MarketDataService {
 
     openingMomentumService.startScheduler(() => this.stocks);
     fyersService.startLiveFeed((ticks) => this.handleRealTicks(ticks));
+    this.startLeanLivePump();
     void this.warmRealCandles();
   }
 
   /**
-   * Connect to Kotak Neo live market feed (last resort after Fyers + Upstox)
+   * Connect to Kotak Neo live market feed
+   * @returns {Promise<boolean>}
    */
   async initKotakLiveFeed() {
     const hasCredentials =
@@ -432,9 +606,8 @@ export class MarketDataService {
       process.env.KOTAK_TOTP_KEY;
 
     if (!hasCredentials) {
-      console.warn('[MarketDataService] No Kotak Neo credentials found. Live ticks disabled (no simulation).');
-      this.isRealData = false;
-      return;
+      console.warn('[MarketDataService] No Kotak Neo credentials found.');
+      return false;
     }
 
     console.log('[MarketDataService] Kotak Neo credentials detected. Attempting live connection...');
@@ -442,12 +615,17 @@ export class MarketDataService {
 
     if (loggedIn) {
       await this.activateKotakLiveFeed();
-    } else {
-      console.warn('[MarketDataService] Kotak Neo login pending/failed. Waiting for live session (no simulation).');
-      this.isRealData = false;
+      return this.activeFeedProvider === 'kotak';
+    }
 
-      // Retry every 10 seconds until live session is available
+    console.warn('[MarketDataService] Kotak Neo login pending/failed — will retry in background.');
+    if (!this.kotakRetryInterval) {
       this.kotakRetryInterval = setInterval(async () => {
+        if (this.activeFeedProvider) {
+          clearInterval(this.kotakRetryInterval);
+          this.kotakRetryInterval = null;
+          return;
+        }
         const retryLogin = await kotakNeoService.login();
         if (retryLogin) {
           clearInterval(this.kotakRetryInterval);
@@ -456,19 +634,18 @@ export class MarketDataService {
         }
       }, 10000);
     }
+    return false;
   }
 
   async activateKotakLiveFeed() {
-    // Don't steal the feed if Fyers or Upstox is already primary
-    if (this.activeFeedProvider === 'fyers' && fyersService.isUsable) {
-      console.log('[MarketDataService] Kotak online but Fyers remains primary feed.');
+    if (this.activeFeedProvider && this.activeFeedProvider !== 'kotak') {
+      console.log(
+        `[MarketDataService] Kotak ready but ${this.activeFeedProvider} remains primary feed.`
+      );
       return;
     }
-    if (this.activeFeedProvider === 'upstox') {
-      console.log('[MarketDataService] Kotak online but Upstox remains primary feed.');
-      return;
-    }
-    console.log('🔥 [MarketDataService] REAL LIVE NSE DATA CONNECTED (Kotak · last resort)!');
+    this.stopAllPlatformFeeds();
+    console.log('🔥 [MarketDataService] KOTAK LIVE NSE DATA CONNECTED!');
     this.isRealData = true;
     this.activeFeedProvider = 'kotak';
 
@@ -497,6 +674,8 @@ export class MarketDataService {
           }
         }
         console.log(`[MarketDataService] Calibrated live NSE quotes for ${this.stocks.size} symbols.`);
+        // Push prices to Terminal/ticker immediately (don't wait for WS / candle warm)
+        this.broadcastScreener();
       }
     } catch (calibErr) {
       console.error('[MarketDataService] Calibration error:', calibErr.message);
@@ -506,19 +685,41 @@ export class MarketDataService {
     openingMomentumService.startScheduler(() => this.stocks);
 
     kotakNeoService.startLiveFeed((ticks) => this.handleRealTicks(ticks));
+    this.startLeanLivePump();
     // Warm real 5m history
     void this.warmRealCandles();
+  }
+
+  /** Active platform broker for APIs / socket / charts */
+  getActiveFeedMeta() {
+    const provider =
+      this.activeFeedProvider ||
+      process.env.PLATFORM_FEED_DEFAULT ||
+      'kotak';
+    const labels = {
+      kotak: 'Platform · Kotak',
+      fyers: 'Platform · Fyers',
+      upstox: 'Platform · Upstox'
+    };
+    return {
+      mode: 'server',
+      provider,
+      label: labels[provider] || `Platform · ${provider}`,
+      live: this.isRealData === true
+    };
   }
 
   broadcastScreener() {
     if (!this.io) return;
     const screener = this.getScreenerData();
+    const feed = this.getActiveFeedMeta();
     this.io.emit('SCREENER_UPDATE', screener);
     // Keep INITIAL_STATE consumers in sync without a page refresh.
     this.io.emit('INITIAL_STATE', {
       screener,
       marketXRay: this.getMarketXRay(),
-      openingMomentum: this.getOpeningMomentumData()
+      openingMomentum: this.getOpeningMomentumData(),
+      feed
     });
   }
 
@@ -535,10 +736,16 @@ export class MarketDataService {
         if (!orderFlowService._prefetching) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
+      // History: prefer Fyers/Upstox REST so Kotak gate stays free for live WS ticks.
+      // Live quotes still follow admin default (kotak → …).
+      const candleOrder = ['fyers', 'upstox', 'kotak'].filter((p) => {
+        if (p === 'fyers') return fyersService.isUsable || process.env.FYERS_ACCESS_TOKEN;
+        if (p === 'upstox') return Boolean(process.env.UPSTOX_ACCESS_TOKEN);
+        if (p === 'kotak') return Boolean(process.env.KOTAK_CONSUMER_KEY);
+        return false;
+      });
       console.log(
-        `[MarketDataService] Warming real 5m candles · ${
-          fyersService.isUsable ? 'Fyers → ' : ''
-        }Upstox → Kotak (throttled)…`
+        `[MarketDataService] Warming real 5m candles · ${candleOrder.join(' → ')} (throttled)…`
       );
       let consecutive429 = 0;
       const symbols = Array.from(this.stocks.values()).filter((s) => s.sector !== 'Indices');
@@ -559,38 +766,40 @@ export class MarketDataService {
         try {
           let realCandles = [];
           let warmProvider = null;
-          // 1) Fyers (skip entirely once auth is dead)
-          if (fyersService.isUsable) {
-            try {
-              realCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
-                timeframe: '5m',
-                rangeDays: 2
-              });
-              if (realCandles?.length) warmProvider = 'fyers';
-            } catch (fyErr) {
-              if (fyersService.isAuthErrorMessage(fyErr.message)) {
-                fyersService.markAuthUnhealthy(fyErr.message);
+          for (const provider of candleOrder) {
+            if (realCandles?.length) break;
+            if (provider === 'fyers') {
+              if (!fyersService.isUsable) continue;
+              try {
+                realCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
+                  timeframe: '5m',
+                  rangeDays: 2
+                });
+                if (realCandles?.length) warmProvider = 'fyers';
+              } catch (fyErr) {
+                if (fyersService.isAuthErrorMessage(fyErr.message)) {
+                  fyersService.markAuthUnhealthy(fyErr.message);
+                }
+                console.warn(`[MarketDataService] Fyers warm ${stock.symbol}:`, fyErr.message);
               }
-              console.warn(`[MarketDataService] Fyers warm ${stock.symbol}:`, fyErr.message);
-            }
-          }
-          // 2) Upstox
-          if (!realCandles?.length) {
-            realCandles = await this._fetchUpstoxCandles(stock.symbol, {
-              timeframe: '5m',
-              rangeDays: 2
-            });
-            if (realCandles?.length) warmProvider = 'upstox';
-          }
-          // 3) Kotak last
-          if (!realCandles?.length) {
-            const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
-            if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
-              realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
+            } else if (provider === 'upstox') {
+              realCandles = await this._fetchUpstoxCandles(stock.symbol, {
                 timeframe: '5m',
                 rangeDays: 2
               });
-              if (realCandles?.length) warmProvider = 'kotak';
+              if (realCandles?.length) warmProvider = 'upstox';
+            } else if (provider === 'kotak') {
+              // Live session: keep Kotak REST free for LTP — history comes from Upstox/Fyers.
+              if (live) continue;
+              if (kotakNeoService.isGateBusy?.()) continue;
+              const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
+              if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
+                realCandles = await kotakNeoService.fetchHistoricalCandles(mapping.segment, mapping.token, {
+                  timeframe: '5m',
+                  rangeDays: 2
+                });
+                if (realCandles?.length) warmProvider = 'kotak';
+              }
             }
           }
           consecutive429 = 0;
@@ -1097,65 +1306,70 @@ export class MarketDataService {
       if (!fetchPromise) {
         fetchPromise = (async () => {
           let filtered = [];
-          let provider = 'fyers';
+          let provider = null;
 
-          // 1) Fyers (platform default) — skip when token is dead
-          if (fyersService.isUsable || (!fyersService.configured && process.env.FYERS_ACCESS_TOKEN)) {
-            try {
-              if (!fyersService.configured) {
-                fyersService.applyCredentials({
-                  appId: process.env.FYERS_APP_ID || '',
-                  appSecret: process.env.FYERS_APP_SECRET || '',
-                  accessToken: process.env.FYERS_ACCESS_TOKEN || '',
-                  refreshToken: process.env.FYERS_REFRESH_TOKEN || '',
-                  pin: process.env.FYERS_PIN || ''
-                });
-              }
-              if (fyersService.isUsable) {
+          // Chart history: Fyers → Upstox → Kotak (spare Kotak REST for live WS)
+          const historyOrder = ['fyers', 'upstox', 'kotak'];
+          for (const p of historyOrder) {
+            if (filtered.length) break;
+            if (p === 'fyers') {
+              if (!(fyersService.isUsable || process.env.FYERS_ACCESS_TOKEN)) continue;
+              try {
+                if (!fyersService.configured) {
+                  fyersService.applyCredentials({
+                    appId: process.env.FYERS_APP_ID || '',
+                    appSecret: process.env.FYERS_APP_SECRET || '',
+                    accessToken: process.env.FYERS_ACCESS_TOKEN || '',
+                    refreshToken: process.env.FYERS_REFRESH_TOKEN || '',
+                    pin: process.env.FYERS_PIN || ''
+                  });
+                }
+                if (!fyersService.isUsable) continue;
                 const fyCandles = await fyersService.fetchHistoricalCandles(stock.symbol, {
                   timeframe,
                   rangeDays
                 });
                 filtered = filterNseSessionCandles(fyCandles || [], timeframe);
                 if (filtered.length) provider = 'fyers';
-              }
-            } catch (e) {
-              if (fyersService.isAuthErrorMessage?.(e.message)) {
-                fyersService.markAuthUnhealthy(e.message);
-              }
-              console.warn(`[MarketDataService] Fyers chart ${stock.symbol}:`, e.message);
-            }
-          }
-
-          // 2) Upstox fallback
-          if (!filtered.length) {
-            const upCandles = await this._fetchUpstoxCandles(stock.symbol, {
-              timeframe,
-              rangeDays
-            });
-            filtered = filterNseSessionCandles(upCandles, timeframe);
-            if (filtered.length) {
-              provider = 'upstox';
-              console.log(
-                `[MarketDataService] Chart ${stock.symbol} ${timeframe}/${rangeDays}d via Upstox fallback`
-              );
-            }
-          }
-
-          // 3) Kotak last resort
-          if (!filtered.length) {
-            const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
-            if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
-              try {
-                const realCandles = await kotakNeoService.fetchHistoricalCandles(
-                  mapping.segment,
-                  mapping.token,
-                  { timeframe, rangeDays }
-                );
-                filtered = filterNseSessionCandles(realCandles || [], timeframe);
-                if (filtered.length) provider = 'kotak';
               } catch (e) {
-                console.warn(`[MarketDataService] Kotak chart ${stock.symbol}:`, e.message);
+                if (fyersService.isAuthErrorMessage?.(e.message)) {
+                  fyersService.markAuthUnhealthy(e.message);
+                }
+                console.warn(`[MarketDataService] Fyers chart ${stock.symbol}:`, e.message);
+              }
+            } else if (p === 'upstox') {
+              if (!process.env.UPSTOX_ACCESS_TOKEN) continue;
+              const upCandles = await this._fetchUpstoxCandles(stock.symbol, {
+                timeframe,
+                rangeDays
+              });
+              filtered = filterNseSessionCandles(upCandles, timeframe);
+              if (filtered.length) {
+                provider = 'upstox';
+                console.log(
+                  `[MarketDataService] Chart ${stock.symbol} ${timeframe}/${rangeDays}d via Upstox`
+                );
+              }
+            } else if (p === 'kotak') {
+              if (kotakNeoService.isGateBusy?.()) {
+                console.warn(
+                  `[MarketDataService] Kotak gate busy — skip chart history for ${stock.symbol}`
+                );
+                continue;
+              }
+              const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
+              if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
+                try {
+                  const realCandles = await kotakNeoService.fetchHistoricalCandles(
+                    mapping.segment,
+                    mapping.token,
+                    { timeframe, rangeDays }
+                  );
+                  filtered = filterNseSessionCandles(realCandles || [], timeframe);
+                  if (filtered.length) provider = 'kotak';
+                } catch (e) {
+                  console.warn(`[MarketDataService] Kotak chart ${stock.symbol}:`, e.message);
+                }
               }
             }
           }
@@ -1197,6 +1411,7 @@ export class MarketDataService {
       }
     }
 
+    const feed = this.getActiveFeedMeta();
     return {
       symbol: stock.symbol,
       name: stock.name,
@@ -1210,7 +1425,8 @@ export class MarketDataService {
       timeframe,
       rangeDays,
       dataSource,
-      chartProvider: stock.chartCache?.provider || null,
+      chartProvider: stock.chartCache?.provider || feed.provider || null,
+      feed,
       isLive: dataSource === 'live' && this.isRealData === true,
       candles,
       smcData

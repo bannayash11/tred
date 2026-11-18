@@ -543,14 +543,23 @@ export async function loadUserWithByokSecrets(userOrId) {
 export async function resolveUserMarketFeed(user) {
   const mode = classifyUserFeedMode(user);
   if (mode !== 'byok') {
+    let feed = { mode: 'server', provider: 'kotak', label: 'Platform · Kotak' };
+    try {
+      const { marketDataService } = await import('./marketDataService.js');
+      if (typeof marketDataService.getActiveFeedMeta === 'function') {
+        feed = marketDataService.getActiveFeedMeta();
+      }
+    } catch {
+      /* keep default */
+    }
     return {
       mode: 'server',
-      provider: null,
+      provider: feed.provider || null,
       session: null,
       secrets: null,
       connected: true,
       error: null,
-      feed: { mode: 'server', provider: 'kotak', label: 'Platform · Kotak' }
+      feed
     };
   }
 

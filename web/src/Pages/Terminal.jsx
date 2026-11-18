@@ -41,6 +41,10 @@ export default function Terminal(props) {
     }
   }, [context.xrayData]);
 
+  useEffect(() => {
+    if (context.feedMeta) setFeedMeta(context.feedMeta);
+  }, [context.feedMeta]);
+
   // Poll screener while setups are still warming — no manual refresh needed.
   useEffect(() => {
     let cancelled = false;
@@ -117,18 +121,15 @@ export default function Terminal(props) {
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
               Live Charts
             </h1>
-            {feedMeta?.label && (
-              <span
-                className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
-                  feedMeta.mode === 'byok'
-                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-                    : 'border-slate-700 bg-slate-900/80 text-slate-400'
-                }`}
-                title="Market data source"
-              >
-                {feedMeta.label}
+            {feedMeta?.mode === 'byok' ? (
+              <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                Your broker
               </span>
-            )}
+            ) : feedMeta ? (
+              <span className="rounded-md border border-emerald-800/50 bg-emerald-950/50 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                LIVE
+              </span>
+            ) : null}
           </div>
           <p className="text-[12px] text-slate-400 mt-1 max-w-xl leading-relaxed">
             NSE F&O setups — tap a name to open its live chart.
