@@ -34,8 +34,13 @@ const NIFTY_50_PRIORITY = new Set([
 
 /** Index symbol aliases: our symbol → Kotak underlying / quote mapping */
 const INDEX_META = {
-  NIFTY: { kotak: 'NIFTY', quote: { symbol: 'NIFTY 50', token: '61471', segment: 'nse_fo' }, exch: 'NSE' },
-  BANKNIFTY: { kotak: 'BANKNIFTY', quote: { symbol: 'BANKNIFTY', token: '61466', segment: 'nse_fo' }, exch: 'NSE' },
+  // Spot index quotes (nse_cm named scrips) — not FO futures tokens
+  NIFTY: { kotak: 'NIFTY', quote: { symbol: 'NIFTY 50', token: 'Nifty 50', segment: 'nse_cm' }, exch: 'NSE' },
+  BANKNIFTY: {
+    kotak: 'BANKNIFTY',
+    quote: { symbol: 'BANKNIFTY', token: 'Nifty Bank', segment: 'nse_cm' },
+    exch: 'NSE'
+  },
   FINNIFTY: { kotak: 'FINNIFTY', quote: null, exch: 'NSE' },
   MIDCPNIFTY: { kotak: 'MIDCPNIFTY', quote: null, exch: 'NSE' }
 };

@@ -39,10 +39,11 @@ class KotakNeoService {
     this._gateSuccessStreak = 0;
     this._gateDepth = 0;
 
-    // F&O NSE CM and FO token mapping for high-liquidity universe
+    // Spot indices via nse_cm named scrips (NOT Nov FUT tokens 61471/61466).
+    // Equities: NSE CM exchange tokens.
     this.tokenMap = [
-      { symbol: 'NIFTY 50', token: '61471', segment: 'nse_fo' },
-      { symbol: 'BANKNIFTY', token: '61466', segment: 'nse_fo' },
+      { symbol: 'NIFTY 50', token: 'Nifty 50', segment: 'nse_cm', kind: 'index' },
+      { symbol: 'BANKNIFTY', token: 'Nifty Bank', segment: 'nse_cm', kind: 'index' },
       { symbol: 'RELIANCE', token: '2885', segment: 'nse_cm' },
       { symbol: 'TCS', token: '11536', segment: 'nse_cm' },
       { symbol: 'INFY', token: '1594', segment: 'nse_cm' },
@@ -450,10 +451,30 @@ class KotakNeoService {
 
       const tokenStr = String(q.exchange_token || q.instrument_token || q.token || '');
       const cleanDisplay = String(q.display_symbol || q.trading_symbol || '').replace(/-EQ$/, '').trim();
+      const dispUp = cleanDisplay.toUpperCase().replace(/\s+/g, ' ');
 
-      const mapping = this.tokenMap.find(
-        (m) => m.token === tokenStr || m.symbol === cleanDisplay || m.symbol === q.trading_symbol
-      );
+      const mapping = this.tokenMap.find((m) => {
+        if (m.token === tokenStr || m.token === cleanDisplay) return true;
+        if (m.symbol === cleanDisplay || m.symbol === q.trading_symbol) return true;
+        if (m.kind === 'index' || /NIFTY|BANKNIFTY/i.test(m.symbol)) {
+          if (
+            m.symbol === 'NIFTY 50' &&
+            (dispUp === 'NIFTY 50' || dispUp === 'NIFTY50' || dispUp === 'NIFTY' || tokenStr === 'Nifty 50')
+          ) {
+            return true;
+          }
+          if (
+            m.symbol === 'BANKNIFTY' &&
+            (dispUp === 'NIFTY BANK' ||
+              dispUp === 'BANKNIFTY' ||
+              dispUp === 'BANK NIFTY' ||
+              tokenStr === 'Nifty Bank')
+          ) {
+            return true;
+          }
+        }
+        return false;
+      });
       if (!mapping) continue;
 
       const openPrice = parseFloat(q.ohlc?.open || ltp);
@@ -493,7 +514,7 @@ class KotakNeoService {
       segment: t.segment,
       token: t.token,
       symbol: t.symbol,
-      kind: t.segment === 'nse_fo' && /NIFTY|BANKNIFTY/i.test(t.symbol) ? 'index' : 'equity'
+      kind: t.kind || (/NIFTY|BANKNIFTY/i.test(t.symbol) ? 'index' : 'equity')
     }));
 
     this.feedWs = new KotakFeedWs({
@@ -842,7 +863,7 @@ class KotakNeoService {
   }
 
   /**
-   * Quote one neo symbol (e.g. nse_cm|2885 or nse_fo|61471).
+   * Quote one neo symbol (e.g. nse_cm|2885 or nse_cm|Nifty 50).
    */
   async fetchQuote(neosymbol) {
     const ok = await this.ensureSession();

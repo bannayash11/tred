@@ -736,9 +736,9 @@ export class MarketDataService {
         if (!orderFlowService._prefetching) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
-      // History: prefer Fyers/Upstox REST so Kotak gate stays free for live WS ticks.
-      // Live quotes still follow admin default (kotak → …).
-      const candleOrder = ['fyers', 'upstox', 'kotak'].filter((p) => {
+      // Candle warm follows admin platform priority (default kotak → fyers → upstox).
+      const { getPlatformFeedPriority } = await import('./platformBrokerService.js');
+      const candleOrder = getPlatformFeedPriority().filter((p) => {
         if (p === 'fyers') return fyersService.isUsable || process.env.FYERS_ACCESS_TOKEN;
         if (p === 'upstox') return Boolean(process.env.UPSTOX_ACCESS_TOKEN);
         if (p === 'kotak') return Boolean(process.env.KOTAK_CONSUMER_KEY);
@@ -789,8 +789,7 @@ export class MarketDataService {
               });
               if (realCandles?.length) warmProvider = 'upstox';
             } else if (provider === 'kotak') {
-              // Live session: keep Kotak REST free for LTP — history comes from Upstox/Fyers.
-              if (live) continue;
+              // Prefer Kotak history when it is platform primary (same source as live LTP).
               if (kotakNeoService.isGateBusy?.()) continue;
               const mapping = kotakNeoService.tokenMap.find((m) => m.symbol === stock.symbol);
               if (mapping && (kotakNeoService.isLoggedIn || process.env.KOTAK_CONSUMER_KEY)) {
@@ -1263,6 +1262,15 @@ export class MarketDataService {
     let high = stock.high;
     let low = stock.low;
 
+    const { getPlatformFeedPriority } = await import('./platformBrokerService.js');
+    const historyOrder = getPlatformFeedPriority().filter((p) => {
+      if (p === 'fyers') return fyersService.isUsable || process.env.FYERS_ACCESS_TOKEN;
+      if (p === 'upstox') return Boolean(process.env.UPSTOX_ACCESS_TOKEN);
+      if (p === 'kotak') return Boolean(process.env.KOTAK_CONSUMER_KEY);
+      return false;
+    });
+    const preferredHistory = historyOrder[0] || null;
+
     const cacheFresh =
       stock.chartCache?.candles?.length > 0 &&
       Date.now() - (stock.chartCache.fetchedAt || 0) < CHART_CACHE_TTL_MS;
@@ -1272,8 +1280,11 @@ export class MarketDataService {
       !cacheHit &&
       cacheFresh &&
       String(stock.chartCache.key || '').startsWith(`${timeframe}:`);
+    // Reject warm/cache from a non-primary (or unknown) broker so chart matches live LTP.
+    const cacheProvider = stock.chartCache?.provider || null;
+    const cacheMatchesPreferred = !preferredHistory || cacheProvider === preferredHistory;
 
-    if (cacheHit || softCacheHit) {
+    if ((cacheHit || softCacheHit) && cacheMatchesPreferred) {
       candles = stock.chartCache.candles;
       smcData = stock.chartCache.smcData;
       dataSource = 'live';
@@ -1282,9 +1293,10 @@ export class MarketDataService {
     } else if (
       timeframe === '5m' &&
       Array.isArray(stock.candles) &&
-      stock.candles.length > 0
+      stock.candles.length > 0 &&
+      cacheMatchesPreferred
     ) {
-      // List already warmed this symbol — serve it on first chart open (no Kotak re-hit).
+      // List already warmed this symbol — serve it on first chart open.
       candles = stock.candles;
       smcData = stock.smcData || smcEngine.analyze(candles, stock.symbol, timeframe);
       dataSource = 'live';
@@ -1294,11 +1306,12 @@ export class MarketDataService {
         key: cacheKey,
         candles,
         smcData,
-        fetchedAt: Date.now()
+        fetchedAt: Date.now(),
+        provider: cacheProvider || preferredHistory || null
       };
     }
 
-    // Only hit Kotak when we still have nothing (or need a different TF than warm).
+    // Fetch when empty, or when cached candles came from a fallback broker.
     if (!candles.length) {
       const inflightKey = `${stock.symbol}|${cacheKey}`;
       let fetchPromise = this._historyInflight.get(inflightKey);
@@ -1308,8 +1321,7 @@ export class MarketDataService {
           let filtered = [];
           let provider = null;
 
-          // Chart history: Fyers → Upstox → Kotak (spare Kotak REST for live WS)
-          const historyOrder = ['fyers', 'upstox', 'kotak'];
+          // Chart history follows admin platform priority (kotak first when default).
           for (const p of historyOrder) {
             if (filtered.length) break;
             if (p === 'fyers') {
